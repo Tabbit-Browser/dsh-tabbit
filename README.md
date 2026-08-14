@@ -1,5 +1,7 @@
 # tabbit-browser
 
+![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png)
+
 这是一个 Tabbit 浏览器为 Deepseek Harness 提供的一个 plugins。你可以在 Deepseek Harness 中安装这个插件，给  Deepseek Harness 提供控制 Tabbit 浏览器的能力。
 
 ## 安装与启动
