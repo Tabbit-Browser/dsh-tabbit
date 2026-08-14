@@ -250,11 +250,11 @@ export function detectWindowsInstallations({ run = spawnSync } = {}) {
 async function detectCli(userHome = homedir(), platform = process.platform) {
   const candidates = platform === 'win32'
     ? [
-        join(userHome, '.local', 'bin', 'tabbit-playwright.cmd'),
-        join(userHome, '.local', 'bin', 'tabbit-playwright.exe'),
-        join(userHome, '.local', 'bin', 'tabbit-playwright'),
+        join(userHome, '.local', 'bin', 'tabbit-cli.cmd'),
+        join(userHome, '.local', 'bin', 'tabbit-cli.exe'),
+        join(userHome, '.local', 'bin', 'tabbit-cli'),
       ]
-    : [join(userHome, '.local', 'bin', 'tabbit-playwright')]
+    : [join(userHome, '.local', 'bin', 'tabbit-cli')]
 
   for (const path of candidates) {
     if (await exists(path, platform === 'win32' ? constants.F_OK : constants.X_OK)) {
@@ -282,9 +282,9 @@ export function isVersionAtLeast(version, minimum = MINIMUM_TABBIT_VERSION) {
   return true
 }
 
-function isTabbitPlaywrightProcess(name, command) {
+function isTabbitRuntimeProcess(name, command) {
   const value = `${name ?? ''} ${command ?? ''}`
-  return /(?:^|[\\/\s])tabbit-playwright(?:-cli)?(?:\.exe)?(?:\s|$)/i.test(value)
+  return /(?:^|[\\/\s])tabbit-cli(?:\.cmd|\.exe)?(?:\s|$)/i.test(value)
     || /(?:^|[\\/\s])nodejs-playwright-runtime\.mjs(?:\s|$)/i.test(value)
 }
 
@@ -292,7 +292,7 @@ export function parseUnixProcessList(output) {
   const processes = []
   for (const line of String(output).split(/\r?\n/)) {
     const match = line.match(/^\s*(\d+)\s+(\S+)\s+(.*)$/)
-    if (!match || !isTabbitPlaywrightProcess(match[2], match[3])) continue
+    if (!match || !isTabbitRuntimeProcess(match[2], match[3])) continue
     processes.push({ pid: Number(match[1]), name: match[2] })
   }
   return processes
@@ -308,7 +308,7 @@ export function parseWindowsProcessList(output) {
   }
   if (!Array.isArray(records)) records = [records]
   return records
-    .filter(record => isTabbitPlaywrightProcess(record.Name, record.CommandLine))
+    .filter(record => isTabbitRuntimeProcess(record.Name, record.CommandLine))
     .map(record => ({
       pid: Number(record.ProcessId),
       name: String(record.Name ?? ''),

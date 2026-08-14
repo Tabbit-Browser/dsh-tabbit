@@ -154,19 +154,19 @@ test('compares Tabbit versions against 1.9.0 numerically', () => {
   assert.equal(isVersionAtLeast(undefined, '1.9.0'), false)
 })
 
-test('recognizes the persistent tabbit-playwright runtime process', () => {
+test('recognizes the persistent tabbit-cli runtime process', () => {
   const unix = parseUnixProcessList(`
-  101 node /opt/tabbit/runtime/nodejs-playwright-runtime.mjs
+    101 node /opt/tabbit/runtime/nodejs-playwright-runtime.mjs
   102 Tabbit /Applications/Tabbit.app/Contents/MacOS/Tabbit
   103 node /tmp/something-else.mjs
 `)
   assert.deepEqual(unix, [{ pid: 101, name: 'node' }])
 
   const windows = parseWindowsProcessList(JSON.stringify([
-    { ProcessId: 201, Name: 'node.exe', CommandLine: String.raw`node C:\Tabbit\nodejs-playwright-runtime.mjs` },
+    { ProcessId: 201, Name: 'tabbit-cli.exe', CommandLine: String.raw`C:\Users\User\.local\bin\tabbit-cli.exe nodejs` },
     { ProcessId: 202, Name: 'Tabbit.exe', CommandLine: String.raw`C:\Tabbit\Tabbit.exe` },
   ]))
-  assert.deepEqual(windows, [{ pid: 201, name: 'node.exe' }])
+  assert.deepEqual(windows, [{ pid: 201, name: 'tabbit-cli.exe' }])
 })
 
 test('requires a supported stable version before checking the runtime process', async () => {

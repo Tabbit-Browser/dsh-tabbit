@@ -53,7 +53,7 @@ dsh web
 
 安装插件后，bundle 会自动加载 Skill Provider，模型可通过
 `skill({ name: "tabbit-browser" })` 或 `/tabbit-browser` 加载说明。Skill 会检查国内或
-国际正式版、要求至少一个版本达到 `1.9.0`，并检查 `tabbit-playwright` 常驻运行时。
+国际正式版、要求至少一个版本达到 `1.9.0`，并检查 `tabbit-cli` 常驻运行时。
 没有安装或版本过低时，模型会直接创建 DSH 后台任务：macOS 读取系统地区，Windows
 调用系统地区 API；中国大陆下载国内正式版，其他地区或无法识别地区时下载国际正式版。
 安装包会保存到用户的 `Downloads` 目录，任务完成后 DSH 会通知安装包路径。
@@ -74,7 +74,7 @@ dsh web
 - 随插件安装自动发现和加载 `tabbit-browser` Skill，无需单独安装 Skill。
 - 检测国际正式版 `Tabbit` 和国内正式版 `Tabbit Browser`。
 - 要求任一正式版版本不低于 `1.9.0`。
-- 检查 `tabbit-playwright` 常驻运行时；未运行时提醒用户重启一次 Tabbit。
+- 检查 `tabbit-cli` 常驻运行时；未运行时提醒用户重启一次 Tabbit。
 - 在两者均未安装或所有正式版版本过低时，通过 `ctx.jobs` 后台下载适配系统地区的正式版安装包。
 - 中国大陆使用 `tabbit.com` 国内版下载源，其他地区使用 `tabbit.ai` 国际版下载源。
 - 输出下载进度，完成后通知安装包绝对路径。

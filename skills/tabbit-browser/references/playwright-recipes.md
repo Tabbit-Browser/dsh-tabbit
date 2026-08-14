@@ -1,12 +1,14 @@
 # Playwright recipes
 
-Use these recipes inside a `tabbit-playwright nodejs --task '<name>'` heredoc.
+Use these recipes inside a `tabbit-cli nodejs --task '<name>'` heredoc.
 Each code block is an async function body: use it
 directly without adding an async wrapper.
 
 ## Contents
 
 - Navigate and inspect
+- Inspect visible controls and visual targets
+- Work with canvas-backed rich editors
 - Fill and submit a form
 - Extract and aggregate data
 - Handle a popup or a possible popup
@@ -35,6 +37,47 @@ return {
 ```
 
 Use `mutation: "possible"` because navigation changes browser state.
+
+## Inspect visible controls and visual targets
+
+Use native Playwright. Prefer semantic locators when the target is known. For a
+broad view, request an AI-mode ARIA snapshot and bound what you return:
+
+```js
+const snapshot = await page.ariaSnapshot({mode: "ai", depth: 20, boxes: true});
+return snapshot.slice(0, 6000);
+```
+
+Use a fresh snapshot ref with `page.locator("aria-ref=e12")`. For iframe refs,
+Playwright accepts the returned `f1e2` form. Use a new snapshot after navigation
+or a substantial render. For canvas or coordinate-only surfaces, use native
+`page.mouse` operations; the evaluation receipt automatically records compact
+cross-frame and open-shadow-root hit diagnostics for mouse clicks.
+
+## Work with canvas-backed rich editors
+
+Canvas-backed editors often keep usable toolbar buttons and editor state in the
+accessibility tree even when their visible DOM is flat or misleading. Inspect
+that tree before using coordinates:
+
+```js
+const before = await page.ariaSnapshot({mode: "ai", depth: 20, boxes: true});
+return before.slice(0, 6000);
+```
+
+Use a ref from that snapshot directly. ARIA refs may include a frame prefix such
+as `f1e2`; native Playwright resolves either form:
+
+```js
+await page.locator("aria-ref=e12").click();
+return (await page.ariaSnapshot({mode: "ai", depth: 20})).slice(0, 6000);
+```
+
+Take a new snapshot after each editor mode change because the next ARIA snapshot
+replaces the old ref set. Check state flags such as `[pressed]`, `[expanded]`,
+`[checked]`, and `[active]`. After inserting a table, verify that the active
+textbox for following content is outside the `table` subtree before typing. Use
+a screenshot only when the ARIA tree and visible surface still disagree.
 
 ## Fill and submit a form
 
@@ -150,20 +193,20 @@ already have fired.
 
 ## Handle same-tab or new-tab navigation
 
-If the page is known to navigate in the same tab, pair the action with the
-specific URL wait:
+Use native Playwright and install the waiter before the action:
 
 ```js
 await Promise.all([
-  page.waitForURL(/\/orders\/\d+$/, {timeout: 15000}),
+  page.waitForURL(/\/orders\/\d+$/),
   page.getByRole("button", {name: /create order/i}).click(),
 ]);
 return {title: await page.title(), url: page.url()};
 ```
 
-For a link with `target="_blank"`, use the popup recipe. Do not replace the
-requested click with `page.goto(linkHref)`; that fails to test real user
-interaction and can skip application behavior.
+For a popup, pair `context.waitForEvent("page")` with the click. Receipts report
+new pages but do not replace the active `page`. Do not replace the requested
+click with `page.goto(linkHref)`; that can skip application behavior. Close
+obsolete task-created pages with native `popup.close()`.
 
 ## Handle JavaScript dialogs
 
@@ -213,6 +256,22 @@ return {
   suggestedFilename: download.suggestedFilename(),
   failure: await download.failure(),
 };
+```
+
+Chromium's built-in PDF viewer may open a page without emitting a download.
+Fetch the rendered link through the BrowserContext request client, validate the
+signature, and save it as an artifact:
+
+```js
+const link = page.getByRole("link", {name: /view pdf/i});
+const pdfUrl = new URL(await link.getAttribute("href"), page.url()).href;
+const response = await context.request.get(pdfUrl);
+assert(response.ok(), `PDF request failed: ${response.status()}`);
+const body = await response.body();
+assert.equal(body.subarray(0, 5).toString(), "%PDF-");
+const output = artifactPath("paper.pdf");
+await (await import("node:fs/promises")).writeFile(output, body);
+return {artifact: output, bytes: body.length, url: pdfUrl};
 ```
 
 For a normal file input, use `setInputFiles()`:
@@ -270,8 +329,8 @@ Use a plain filename with `artifactPath()`:
 
 ```js
 const output = artifactPath("final-state.png");
-await page.screenshot({path: output, fullPage: true});
-return {artifact: output, title: await page.title(), url: page.url()};
+const screenshot = await page.screenshot({path: output, fullPage: true});
+return {screenshot, title: await page.title(), url: page.url()};
 ```
 
 Take screenshots as evidence or when visual state matters, not as the default

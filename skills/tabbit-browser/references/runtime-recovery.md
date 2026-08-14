@@ -10,7 +10,7 @@ Every evaluation is serialized and identified by `requestId`.
 - `succeeded`: use `result.value` or its resource handle.
 - `failed`: inspect the error and correct the code only when no uncertain
   mutation remains.
-- `queued` or `running`: the operation is still live. Run `tabbit-playwright
+- `queued` or `running`: the operation is still live. Run `tabbit-cli
   receipt --task '<name>' --request '<request-id>'`; do not submit the operation
   again.
 - `interrupted` with `mutationState: "possible"`: the action may already have
@@ -23,7 +23,7 @@ is not an operation failure.
 
 1. Read the named task's receipt with the same request ID.
 2. If still queued or running, continue polling the same receipt.
-3. Run `tabbit-playwright checkpoint --task '<name>'` after it settles. Check
+3. Run `tabbit-cli checkpoint --task '<name>'` after it settles. Check
    `url`, `pageCount`,
    `targetEpoch`, `documentGeneration`, and `mainFrameAttached`.
 4. Inspect the application state with a new read-only evaluation.
@@ -71,7 +71,7 @@ operation; it does not run new code. Never assign that ID to changed code.
 
 Prefer returning a small aggregate. When the result is a resource handle:
 
-1. Run `tabbit-playwright resource --task '<name>' --resource '<id>' --offset 0`.
+1. Run `tabbit-cli resource --task '<name>' --resource '<id>' --offset 0`.
 2. Append the returned slice.
 3. Continue with exactly the returned `nextOffset`.
 4. Stop when `eof` is true.
@@ -82,7 +82,7 @@ answer is sufficient.
 
 ## Cleanup
 
-Run `tabbit-playwright finish --task '<name>'` exactly once after verification
+Run `tabbit-cli finish --task '<name>'` exactly once after verification
 or when abandoning a failed task. A successful result is:
 
 ```json

@@ -1,32 +1,44 @@
 ---
 name: tabbit-browser
-description: Control the user's Tabbit Browser through its Browser-owned Runtime Service and task-isolated genuine Playwright CLI. Use for Tabbit browser automation, website interaction, extraction, QA, and benchmarks, including stable-browser version checks, runtime-process checks, and background installer download when Tabbit is absent or outdated; never silently fall back to another browser automation backend.
+description: Control the user's Tabbit Browser through its Browser-owned, task-isolated Playwright CLI and runtime helpers. Use for Tabbit browser automation, website interaction, extraction, QA, and benchmarks; always keep the stable-browser preflight and never switch backends.
 ---
 
 # Tabbit Browser
 
-Use only the installed `~/.local/bin/tabbit-playwright` CLI through the host's
+Use only the installed `tabbit-cli` CLI through the host's
 shell. The CLI may launch Tabbit Browser when it is not running, but it never
 starts or restarts the Browser Runtime Service itself. Do not launch another
 browser or use Chrome, Ego, curl, raw CDP, or the older `tabbit-browser-use`
 plugin.
 
+## Start
+
+Before the first CLI command, read
+[`references/platform-invocation.md`](references/platform-invocation.md). Use
+the exact launcher path documented there. The launcher must be the first command
+token on every invocation; do not wrap it with `env`, `time`, or `sh -lc`.
+Browser owns the Runtime Service.
+
 ## Ensure Tabbit is available
 
 Before the first browser operation in a task, call `tabbit_browser_install`
-immediately. Do not ask the user for confirmation first.
+immediately. Do not ask the user for confirmation first. Do not narrate the
+individual checks or their order; report only the final environment result.
 
-1. If it returns `ready`, continue with the CLI workflow.
-2. If it returns `restart-required`, tell the user that Tabbit meets the minimum
-   version but its `tabbit-playwright` runtime process is not running, and ask
-   them to restart Tabbit Browser once. Do not launch or restart it on their
-   behalf and do not switch to another browser backend.
-3. If it returns `background`, do not start another download. DSH owns the job,
-   exposes its progress through the job tools, and sends a completion notice.
-   When completion reports `TABBIT_INSTALLER_READY`, tell the user the exact
-   installer path and ask them to finish the native installer, then launch
-   Tabbit Browser once. If the completion notice omits the path, read that job's
-   final output once.
+- If it returns `ready`, tell the user that the environment check passed and
+  continue with the CLI workflow.
+- If it returns `restart-required`, report that the environment check failed
+  because the installed Tabbit version is sufficient but the `tabbit-cli`
+  Runtime is not running. Ask the user to restart Tabbit Browser once. Do not
+  launch or restart it on their behalf and do not switch to another browser
+  backend.
+- If it returns `background`, report that the environment check failed, include
+  the concrete reason and job ID, and do not start another download. DSH owns
+  the job, exposes its progress through the job tools, and sends a completion
+  notice. When completion reports `TABBIT_INSTALLER_READY`, tell the user the
+  exact installer path and ask them to finish the native installer, then launch
+  Tabbit Browser once. If the completion notice omits the path, read that job's
+  final output once.
 
 The install tool recognizes only the stable international `Tabbit` and stable
 domestic `Tabbit Browser`; it never detects development builds. If neither is
@@ -48,7 +60,7 @@ whole user request and its follow-ups. A Runtime Service restart creates a new
 generation and does not revive old named tasks.
 
 ```bash
-~/.local/bin/tabbit-playwright nodejs --task 'inspect extensions' <<'EOF'
+tabbit-cli nodejs --task 'inspect extensions' <<'EOF'
 await page.goto('chrome://extensions', {waitUntil: 'domcontentloaded'});
 return {title: await page.title(), url: page.url()};
 EOF
@@ -59,7 +71,7 @@ The command prints one JSON object containing `task` metadata and an evaluation
 `receipt.result.value`. Values assigned to `globalThis` survive later calls:
 
 ```bash
-~/.local/bin/tabbit-playwright nodejs --task 'inspect extensions' --read-only <<'EOF'
+tabbit-cli nodejs --task 'inspect extensions' --read-only <<'EOF'
 globalThis.extensionCount = await page.locator('extensions-item').count();
 return {extensionCount};
 EOF
@@ -122,6 +134,31 @@ before choosing the next action. For extraction, pagination, virtual lists,
 deduplication, and output limits, read
 [`references/information-extraction.md`](references/information-extraction.md).
 
+For helpers, read
+[`references/interaction-helpers.md`](references/interaction-helpers.md). For
+popups, dialogs, frames, downloads, uploads, or repeated actions, read only the
+matching section of
+[`references/playwright-recipes.md`](references/playwright-recipes.md).
+
+## Runtime helpers
+
+The persistent Node evaluation realm exposes the frozen `tabbit` global. It
+adds bounded observation and safer interaction helpers without replacing native
+Playwright APIs:
+
+- Use `tabbit.observe()` for bounded page, frame, focus, and accessibility state.
+- Call `tabbit.focusInfo()` before keyboard or bulk input.
+- Use `tabbit.actionability()` or `tabbit.safeClick()` for targets inside frames.
+- Use `tabbit.hitTest()` before coordinate actions.
+- Prefer `tabbit.pasteText()` for multiline or tabular content, then verify the
+  application-visible result.
+- Use `tabbit.triggerAndObserve()` for ambiguous transitions and
+  `tabbit.triggerAndWait()` for one known event.
+
+For screenshots, `page.screenshot()` returns a receipt. When its
+`screenshotsDelta` requests `load_image`, immediately load the PNG with
+`view_image(path)` before making visual claims.
+
 ## Working loop
 
 1. Inspect the relevant page state with locators or one compact extraction.
@@ -133,7 +170,7 @@ deduplication, and output limits, read
 5. Finish only after verification:
 
 ```bash
-~/.local/bin/tabbit-playwright finish --task 'inspect extensions'
+tabbit-cli finish --task 'inspect extensions'
 ```
 
 Finishing closes task-created pages by default and never closes claimed user
@@ -174,7 +211,7 @@ Use a stable `--request-id <id>` for important mutations. If a receipt is
 `queued` or `running`, do not submit the code again:
 
 ```bash
-~/.local/bin/tabbit-playwright receipt --task 'inspect extensions' \
+tabbit-cli receipt --task 'inspect extensions' \
   --request 'submit-change-01'
 ```
 
@@ -182,7 +219,7 @@ If a mutation is interrupted, inspect the receipt and checkpoint before
 continuing:
 
 ```bash
-~/.local/bin/tabbit-playwright checkpoint --task 'inspect extensions'
+tabbit-cli checkpoint --task 'inspect extensions'
 ```
 
 Read [`references/runtime-recovery.md`](references/runtime-recovery.md) for the
@@ -191,7 +228,7 @@ uncertainty by switching browser automation backends.
 
 ## Availability
 
-If `~/.local/bin/tabbit-playwright` is missing or not executable, follow
+If `tabbit-cli` is missing or not executable, follow
 **Ensure Tabbit is available** before reporting failure. Do not look in
 `chrome://extensions`: this is an external Agent skill and CLI, not a browser
 extension.

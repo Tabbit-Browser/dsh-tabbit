@@ -4,7 +4,7 @@ import { createDownloadJob, detectTabbit } from './installer.js'
 
 const PROVIDER_NAME = 'tabbit-browser-bundled-skill'
 const SKILL_NAME = 'tabbit-browser'
-const SKILL_DESCRIPTION = 'Control the user\'s Tabbit Browser through its Browser-owned Runtime Service and task-isolated genuine Playwright CLI. Use for Tabbit browser automation, website interaction, extraction, QA, and benchmarks, including stable-browser version checks, runtime-process checks, and background installer download when Tabbit is absent or outdated; never silently fall back to another browser automation backend.'
+const SKILL_DESCRIPTION = 'Control the user\'s Tabbit Browser through its Browser-owned, task-isolated Playwright CLI and runtime helpers. Use for Tabbit browser automation, website interaction, extraction, QA, and benchmarks, including stable-browser version checks, runtime-process checks, and background installer download when Tabbit is absent or outdated; never silently fall back to another browser automation backend.'
 const SKILL_URL = new URL('./skills/tabbit-browser/SKILL.md', import.meta.url)
 const RESOURCE_BASE = {
   kind: 'directory',
@@ -64,7 +64,7 @@ function registerInstallerTool(ctx) {
 
   ctx.tools.register({
     name: 'tabbit_browser_install',
-    description: 'Check stable Tabbit editions, require version 1.9.0 or newer, and verify the tabbit-playwright runtime process. Download the region-appropriate installer in the background when Tabbit is missing or outdated; otherwise report when the browser must be restarted once.',
+    description: 'Check stable Tabbit editions, require version 1.9.0 or newer, and verify the tabbit-cli runtime process. Download the region-appropriate installer in the background when Tabbit is missing or outdated; otherwise report when the browser must be restarted once.',
     parameters: {
       type: 'object',
       properties: {},
@@ -117,7 +117,7 @@ function registerInstallerTool(ctx) {
           if (snapshot.status === 'running' || snapshot.status === 'stopping') {
             return {
               status: 'background',
-              message: `Tabbit Browser installer download is already running as ${existingJobId}.`,
+              message: `Environment check failed: a Tabbit installer download is already running as ${existingJobId}.`,
               jobId: String(existingJobId),
             }
           }
@@ -133,7 +133,7 @@ function registerInstallerTool(ctx) {
           .join(', ')
         return {
           status: 'ready',
-          message: `Supported Tabbit installation(s): ${versions}. The tabbit-playwright runtime process is running.`,
+          message: `Environment check passed. Tabbit is ready${versions ? ` (${versions})` : ''}.`,
           cliReady: detected.cliReady,
           minimumVersion: detected.minimumVersion,
           playwrightProcessRunning: true,
@@ -146,7 +146,7 @@ function registerInstallerTool(ctx) {
           .join(', ')
         return {
           status: 'restart-required',
-          message: `${versions} meets the minimum version ${detected.minimumVersion}, but the tabbit-playwright runtime process is not running. Please restart Tabbit Browser once before using browser automation.`,
+          message: `Environment check failed: ${versions} meets the minimum version ${detected.minimumVersion}, but the tabbit-cli Runtime is not running. Please restart Tabbit Browser once before using browser automation.`,
           cliReady: detected.cliReady,
           minimumVersion: detected.minimumVersion,
           playwrightProcessRunning: false,
@@ -173,7 +173,7 @@ function registerInstallerTool(ctx) {
       if (owner) activeJobs.set(owner, jobId)
       return {
         status: 'background',
-        message: `${downloadReason} Started the region-appropriate Tabbit installer download as ${jobId}. DSH will report progress and notify you when the installer is ready.`,
+        message: `Environment check failed: ${downloadReason} Started the region-appropriate Tabbit installer download as ${jobId}. DSH will report progress and notify you when the installer is ready.`,
         jobId: String(jobId),
         cliReady: detected.cliReady,
         minimumVersion: detected.minimumVersion,
