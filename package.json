@@ -1,0 +1,35 @@
+{
+  "name": "tabbit-browser",
+  "version": "0.1.0",
+  "description": "DSH bundle that packages the Tabbit Browser skill and background installer",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "installer.js",
+    "cordis.patch.yml",
+    "skills/**",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0",
+    "@deepseek-ai/dsh-jobs": ">=0.1.0-rc.5",
+    "@deepseek-ai/dsh-skill": ">=0.1.0-rc.5",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.5"
+  },
+  "license": "MIT"
+}

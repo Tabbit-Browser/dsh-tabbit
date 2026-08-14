@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tabbit Browser"
+  short_description: "Control or install stable Tabbit for Playwright tasks"
+  default_prompt: "Use $tabbit-browser to ensure stable Tabbit is available, then complete this browser task in a Browser-owned isolated task space."
