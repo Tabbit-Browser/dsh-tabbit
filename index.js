@@ -83,7 +83,7 @@ function registerInstallerTool(ctx) {
           cliReady: { type: 'boolean' },
           minimumVersion: { type: 'string' },
           playwrightProcessRunning: { type: 'boolean' },
-          playwrightInstanceCount: { type: 'integer', minimum: 0 },
+          playwrightInstanceCount: { type: 'integer' },
           playwrightRuntimeAmbiguous: { type: 'boolean' },
           installations: {
             type: 'array',
