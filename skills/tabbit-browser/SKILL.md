@@ -27,6 +27,10 @@ individual checks or their order; report only the final environment result.
 
 - If it returns `ready`, tell the user that the environment check passed and
   continue with the CLI workflow.
+- If the result says that multiple Tabbit instances are running, do not ask
+  the user to restart Tabbit and do not report the Runtime as unavailable. Use
+  an instance ID from the CLI's selection error and set
+  `TABBIT_PLAYWRIGHT_INSTANCE` for subsequent CLI calls.
 - If it returns `restart-required`, report that the environment check failed
   because the installed Tabbit version is sufficient but the `tabbit-cli`
   Runtime is not running. Ask the user to restart Tabbit Browser once. Do not

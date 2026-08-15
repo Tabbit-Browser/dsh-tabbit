@@ -336,6 +336,15 @@ export function detectTabbitPlaywrightProcesses({
   return result.status === 0 ? parseUnixProcessList(result.stdout) : []
 }
 
+export function summarizeTabbitRuntime(playwrightProcesses) {
+  const instanceCount = Array.isArray(playwrightProcesses) ? playwrightProcesses.length : 0
+  return {
+    instanceCount,
+    running: instanceCount > 0,
+    ambiguous: instanceCount > 1,
+  }
+}
+
 export async function detectTabbit({
   platform = process.platform,
   userHome = homedir(),
@@ -354,10 +363,10 @@ export async function detectTabbit({
   const playwrightProcesses = supportedInstallations.length > 0
     ? detectTabbitPlaywrightProcesses({ platform, run })
     : []
-  const playwrightProcessRunning = playwrightProcesses.length > 0
+  const runtime = summarizeTabbitRuntime(playwrightProcesses)
   const recommendation = supportedInstallations.length === 0
     ? 'download'
-    : playwrightProcessRunning
+    : runtime.running
       ? 'ready'
       : 'restart-required'
   return {
@@ -367,7 +376,9 @@ export async function detectTabbit({
     cliPath: cli.path,
     installations,
     supportedInstallations,
-    playwrightProcessRunning,
+    playwrightProcessRunning: runtime.running,
+    playwrightInstanceCount: runtime.instanceCount,
+    playwrightRuntimeAmbiguous: runtime.ambiguous,
     playwrightProcesses,
     recommendation,
   }

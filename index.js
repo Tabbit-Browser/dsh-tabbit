@@ -83,6 +83,8 @@ function registerInstallerTool(ctx) {
           cliReady: { type: 'boolean' },
           minimumVersion: { type: 'string' },
           playwrightProcessRunning: { type: 'boolean' },
+          playwrightInstanceCount: { type: 'integer', minimum: 0 },
+          playwrightRuntimeAmbiguous: { type: 'boolean' },
           installations: {
             type: 'array',
             items: {
@@ -131,12 +133,17 @@ function registerInstallerTool(ctx) {
         const versions = detected.supportedInstallations
           .map(item => `${item.name} ${item.version}`)
           .join(', ')
+        const instanceNote = detected.playwrightRuntimeAmbiguous
+          ? ` Multiple Tabbit instances are running (${detected.playwrightInstanceCount}); set TABBIT_PLAYWRIGHT_INSTANCE before invoking tabbit-cli.`
+          : ''
         return {
           status: 'ready',
-          message: `Environment check passed. Tabbit is ready${versions ? ` (${versions})` : ''}.`,
+          message: `Environment check passed. Tabbit is ready${versions ? ` (${versions})` : ''}.${instanceNote}`,
           cliReady: detected.cliReady,
           minimumVersion: detected.minimumVersion,
-          playwrightProcessRunning: true,
+          playwrightProcessRunning: detected.playwrightProcessRunning,
+          playwrightInstanceCount: detected.playwrightInstanceCount,
+          playwrightRuntimeAmbiguous: detected.playwrightRuntimeAmbiguous,
           installations: detected.installations,
         }
       }
@@ -150,6 +157,8 @@ function registerInstallerTool(ctx) {
           cliReady: detected.cliReady,
           minimumVersion: detected.minimumVersion,
           playwrightProcessRunning: false,
+          playwrightInstanceCount: detected.playwrightInstanceCount,
+          playwrightRuntimeAmbiguous: detected.playwrightRuntimeAmbiguous,
           installations: detected.installations,
         }
       }
@@ -178,6 +187,8 @@ function registerInstallerTool(ctx) {
         cliReady: detected.cliReady,
         minimumVersion: detected.minimumVersion,
         playwrightProcessRunning: false,
+        playwrightInstanceCount: detected.playwrightInstanceCount,
+        playwrightRuntimeAmbiguous: detected.playwrightRuntimeAmbiguous,
         installations: detected.installations,
       }
     },

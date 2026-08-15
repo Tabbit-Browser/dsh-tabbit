@@ -17,6 +17,7 @@ import {
   parseUnixProcessList,
   parseWindowsProcessList,
   parseWindowsUninstallRegistry,
+  summarizeTabbitRuntime,
 } from '../installer.js'
 
 test('maps supported platforms and detects Apple Silicon under Rosetta', () => {
@@ -167,6 +168,17 @@ test('recognizes the persistent tabbit-cli runtime process', () => {
     { ProcessId: 202, Name: 'Tabbit.exe', CommandLine: String.raw`C:\Tabbit\Tabbit.exe` },
   ]))
   assert.deepEqual(windows, [{ pid: 201, name: 'tabbit-cli.exe' }])
+})
+
+test('treats multiple runtime processes as running but ambiguous', () => {
+  assert.deepEqual(
+    summarizeTabbitRuntime([{ pid: 101 }, { pid: 102 }, { pid: 103 }]),
+    { instanceCount: 3, running: true, ambiguous: true },
+  )
+  assert.deepEqual(
+    summarizeTabbitRuntime([]),
+    { instanceCount: 0, running: false, ambiguous: false },
+  )
 })
 
 test('requires a supported stable version before checking the runtime process', async () => {

@@ -77,6 +77,8 @@ dsh web
 - 检测国际正式版 `Tabbit` 和国内正式版 `Tabbit Browser`。
 - 要求任一正式版版本不低于 `1.9.0`。
 - 检查 `tabbit-cli` 常驻运行时；未运行时提醒用户重启一次 Tabbit。
+- 多个 Tabbit 实例同时运行时，仍判定 Runtime 可用；模型需根据 CLI 提示设置
+  `TABBIT_PLAYWRIGHT_INSTANCE`，不会把实例选择歧义误报为 Runtime 未运行。
 - 在两者均未安装或所有正式版版本过低时，通过 `ctx.jobs` 后台下载适配系统地区的正式版安装包。
 - 中国大陆使用 `tabbit.com` 国内版下载源，其他地区使用 `tabbit.ai` 国际版下载源。
 - 输出下载进度，完成后通知安装包绝对路径。
