@@ -111,7 +111,7 @@ function registerInstallerTool(ctx) {
     },
     isConcurrencySafe: () => true,
     async execute(_args, exec) {
-      const owner = exec.agent
+      const owner = (exec.agent != null && typeof exec.agent === 'object') ? exec.agent : null
       const existingJobId = owner ? activeJobs.get(owner) : undefined
       if (existingJobId) {
         try {
