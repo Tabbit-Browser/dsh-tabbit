@@ -282,6 +282,45 @@ test('checks the bundled CLI paths for both stable macOS editions', async () => 
   }
 })
 
+test('checks bundled CLI paths below a Windows installation root', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tabbit-win-cli-'))
+  const installationPath = join(root, 'Tabbit Browser')
+  const cliPath = join(installationPath, 'vendor', 'runtime', 'tabbit-playwright-cli.exe')
+  await mkdir(join(cliPath, '..'), { recursive: true })
+  await writeFile(cliPath, 'fixture')
+
+  const registry = `
+HKEY_CURRENT_USER\\Software\\TabbitBrowser
+    DisplayName    REG_SZ    Tabbit Browser
+    DisplayVersion    REG_SZ    1.9.22.0
+    InstallLocation    REG_SZ    ${installationPath}
+`
+  try {
+    const detected = await detectTabbit({
+      platform: 'win32',
+      userHome: join(root, 'home'),
+      run(command) {
+        if (command === 'reg.exe') return { status: 0, stdout: registry }
+        if (command === 'powershell.exe') {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              ProcessId: 42,
+              Name: 'node.exe',
+              CommandLine: 'browser-runtime-service.mjs',
+            }),
+          }
+        }
+        return { status: 1, stdout: '' }
+      },
+    })
+    assert.equal(detected.cliReady, true)
+    assert.equal(detected.recommendation, 'ready')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 function fakeResponse(bytes, {
   url = 'https://pkg.tabbit.com/Tabbit.exe',
   filename = 'Tabbit Browser.exe',
