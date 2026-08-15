@@ -234,6 +234,54 @@ test('requires a supported stable version before checking the runtime process', 
   }
 })
 
+test('checks the bundled CLI paths for both stable macOS editions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tabbit-cli-paths-'))
+  const userHome = join(root, 'home')
+  const installations = [
+    {
+      name: 'Tabbit',
+      path: join(root, 'Applications', 'Tabbit.app'),
+    },
+    {
+      name: 'Tabbit Browser',
+      path: join(root, 'Applications', 'Tabbit Browser.app'),
+    },
+  ]
+  try {
+    for (const installation of installations) {
+      await mkdir(join(installation.path, 'Contents'), { recursive: true })
+      await writeFile(join(installation.path, 'Contents', 'Info.plist'), 'fixture')
+      const cliPath = join(
+        installation.path,
+        'arbitrary',
+        installation.name === 'Tabbit' ? 'runtime' : 'tools',
+        installation.name === 'Tabbit' ? 'tabbit-playwright-cli' : 'tabbit-cli',
+      )
+      await mkdir(join(cliPath, '..'), { recursive: true })
+      await writeFile(cliPath, 'fixture')
+    }
+    const detected = await detectTabbit({
+      platform: 'darwin',
+      userHome,
+      run: (_command, args) => {
+        if (args[1] === 'CFBundleIdentifier') {
+          return {
+            status: 0,
+            stdout: args.at(-1).includes('Tabbit Browser.app')
+              ? 'com.tab-browser.Tabbit'
+              : 'com.tabbit-ai.Tabbit',
+          }
+        }
+        if (args[1] === 'CFBundleShortVersionString') return { status: 0, stdout: '1.9.22.0' }
+        return { status: 1, stdout: '' }
+      },
+    })
+    assert.equal(detected.cliReady, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 function fakeResponse(bytes, {
   url = 'https://pkg.tabbit.com/Tabbit.exe',
   filename = 'Tabbit Browser.exe',

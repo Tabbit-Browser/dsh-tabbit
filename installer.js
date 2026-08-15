@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, mkdir, open, rename, rm } from 'node:fs/promises'
+import { access, mkdir, open, readdir, rename, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -247,7 +247,30 @@ export function detectWindowsInstallations({ run = spawnSync } = {}) {
   return installations
 }
 
-async function detectCli(userHome = homedir(), platform = process.platform) {
+const CLI_FILE_PATTERN = /^tabbit-(?:playwright-)?cli(?:\.(?:cmd|exe))?$/i
+
+async function findBundledCli(root) {
+  if (!root) return []
+  let entries
+  try {
+    entries = await readdir(root, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const found = []
+  for (const entry of entries) {
+    const path = join(root, entry.name)
+    if (entry.isDirectory()) {
+      found.push(...await findBundledCli(path))
+    } else if (entry.isFile() && CLI_FILE_PATTERN.test(entry.name)) {
+      found.push(path)
+    }
+  }
+  return found
+}
+
+async function detectCli(userHome = homedir(), platform = process.platform, installations = []) {
   const candidates = platform === 'win32'
     ? [
         join(userHome, '.local', 'bin', 'tabbit-cli.cmd'),
@@ -255,6 +278,10 @@ async function detectCli(userHome = homedir(), platform = process.platform) {
         join(userHome, '.local', 'bin', 'tabbit-cli'),
       ]
     : [join(userHome, '.local', 'bin', 'tabbit-cli')]
+
+  for (const installation of installations) {
+    candidates.push(...await findBundledCli(installation.path))
+  }
 
   for (const path of candidates) {
     if (await exists(path, platform === 'win32' ? constants.F_OK : constants.X_OK)) {
@@ -357,7 +384,7 @@ export async function detectTabbit({
     : platform === 'win32'
       ? detectWindowsInstallations({ run })
       : []
-  const cli = await detectCli(userHome, platform)
+  const cli = await detectCli(userHome, platform, installations)
   const supportedInstallations = installations.filter(item => (
     isVersionAtLeast(item.version, minimumVersion)
   ))
