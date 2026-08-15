@@ -31,6 +31,7 @@ test('registers one bundled tabbit-browser skill', async () => {
     tool.output.schema.properties.status.enum,
     ['ready', 'restart-required', 'background'],
   )
+  assert.equal(tool.output.schema.properties.cliPath.type, 'string')
 
   const provider = factory({})
   const candidates = await provider.list()

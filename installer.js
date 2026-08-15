@@ -270,9 +270,29 @@ async function findBundledCli(root) {
   return found
 }
 
-async function detectCli(userHome = homedir(), platform = process.platform, installations = []) {
+const WINDOWS_LOCAL_AGENT_CLI_DIRECTORY = ['Tabbit', 'LocalAgent', 'bin']
+
+function localAgentCliCandidates(localAppData) {
+  if (!localAppData) return []
+  const directory = join(localAppData, ...WINDOWS_LOCAL_AGENT_CLI_DIRECTORY)
+  return [
+    join(directory, 'tabbit-cli.exe'),
+    join(directory, 'tabbit-cli.cmd'),
+    join(directory, 'tabbit-cli'),
+  ]
+}
+
+async function detectCli({
+  userHome = homedir(),
+  platform = process.platform,
+  env = process.env,
+  installations = [],
+} = {}) {
   const candidates = platform === 'win32'
     ? [
+        // Browser-owned LocalAgent launcher first: it stays current across
+        // app updates and is the same launcher the browser itself uses.
+        ...localAgentCliCandidates(env.LOCALAPPDATA),
         join(userHome, '.local', 'bin', 'tabbit-cli.cmd'),
         join(userHome, '.local', 'bin', 'tabbit-cli.exe'),
         join(userHome, '.local', 'bin', 'tabbit-cli'),
@@ -311,9 +331,9 @@ export function isVersionAtLeast(version, minimum = MINIMUM_TABBIT_VERSION) {
 
 function isTabbitRuntimeProcess(name, command) {
   const value = `${name ?? ''} ${command ?? ''}`
-  return /(?:^|[\\/\s])tabbit-cli(?:\.cmd|\.exe)?(?:\s|$)/i.test(value)
-    || /(?:^|[\\/\s])nodejs-playwright-runtime\.mjs(?:\s|$)/i.test(value)
-    || /(?:^|[\\/\s])browser-runtime-service\.mjs(?:\s|$)/i.test(value)
+  return /(?:^|[\\/\s"])tabbit-cli(?:\.cmd|\.exe)?(?:\s|"|$)/i.test(value)
+    || /(?:^|[\\/\s"])nodejs-playwright-runtime\.mjs(?:\s|"|$)/i.test(value)
+    || /(?:^|[\\/\s"])browser-runtime-service\.mjs(?:\s|"|$)/i.test(value)
 }
 
 export function parseUnixProcessList(output) {
@@ -376,6 +396,7 @@ export function summarizeTabbitRuntime(playwrightProcesses) {
 export async function detectTabbit({
   platform = process.platform,
   userHome = homedir(),
+  env = process.env,
   run = spawnSync,
   minimumVersion = MINIMUM_TABBIT_VERSION,
 } = {}) {
@@ -384,7 +405,7 @@ export async function detectTabbit({
     : platform === 'win32'
       ? detectWindowsInstallations({ run })
       : []
-  const cli = await detectCli(userHome, platform, installations)
+  const cli = await detectCli({ userHome, platform, env, installations })
   const supportedInstallations = installations.filter(item => (
     isVersionAtLeast(item.version, minimumVersion)
   ))

@@ -15,7 +15,8 @@ plugin.
 
 Before the first CLI command, read
 [`references/platform-invocation.md`](references/platform-invocation.md). Use
-the exact launcher path documented there. The launcher must be the first command
+the exact launcher path documented there, preferring the `cliPath` reported by
+`tabbit_browser_install` when present. The launcher must be the first command
 token on every invocation; do not wrap it with `env`, `time`, or `sh -lc`.
 Browser owns the Runtime Service.
 

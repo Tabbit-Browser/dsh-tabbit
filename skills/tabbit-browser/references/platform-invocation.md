@@ -1,10 +1,13 @@
 # Platform invocation
 
-Use the stable Tabbit CLI installed by Tabbit Browser:
+Use the stable `tabbit-cli` launcher installed by Tabbit Browser. When
+`tabbit_browser_install` returned a `cliPath`, use that exact path.
 
-```text
-~/.local/bin/tabbit-cli
-```
+Otherwise use the platform default:
+
+- Windows PowerShell: `$env:LOCALAPPDATA\Tabbit\LocalAgent\bin\tabbit-cli.exe`
+- Windows Git Bash: `"$LOCALAPPDATA/Tabbit/LocalAgent/bin/tabbit-cli.exe"`
+- macOS/Linux: `~/.local/bin/tabbit-cli`
 
 Invoke it as the first command token. For example:
 

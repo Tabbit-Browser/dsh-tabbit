@@ -171,8 +171,17 @@ test('recognizes the persistent tabbit-cli runtime process', () => {
   const windows = parseWindowsProcessList(JSON.stringify([
     { ProcessId: 201, Name: 'tabbit-cli.exe', CommandLine: String.raw`C:\Users\User\.local\bin\tabbit-cli.exe nodejs` },
     { ProcessId: 202, Name: 'Tabbit.exe', CommandLine: String.raw`C:\Tabbit\Tabbit.exe` },
+    { ProcessId: 203, Name: 'node.exe', CommandLine: String.raw`"E:\Tabbit\Application\1.9.22.0\TabbitDance\node.exe" "E:\Tabbit\Application\1.9.22.0\TabbitDance\runtime\src\browser-runtime-service.mjs" --browser-transport="{}"` },
+    { ProcessId: 204, Name: 'tabbit-cli.exe', CommandLine: String.raw`"C:\Users\User\.local\bin\tabbit-cli.exe" nodejs --task x` },
+    { ProcessId: 205, Name: 'node.exe', CommandLine: String.raw`"C:\Tabbit\TabbitDance\node.exe" "C:\Tabbit\TabbitDance\runtime\src\nodejs-playwright-runtime.mjs"` },
+    { ProcessId: 206, Name: 'Tabbit.exe', CommandLine: String.raw`"C:\Tabbit\Tabbit.exe"` },
   ]))
-  assert.deepEqual(windows, [{ pid: 201, name: 'tabbit-cli.exe' }])
+  assert.deepEqual(windows, [
+    { pid: 201, name: 'tabbit-cli.exe' },
+    { pid: 203, name: 'node.exe' },
+    { pid: 204, name: 'tabbit-cli.exe' },
+    { pid: 205, name: 'node.exe' },
+  ])
 })
 
 test('treats multiple runtime processes as running but ambiguous', () => {
@@ -299,6 +308,7 @@ HKEY_CURRENT_USER\\Software\\TabbitBrowser
     const detected = await detectTabbit({
       platform: 'win32',
       userHome: join(root, 'home'),
+      env: {},
       run(command) {
         if (command === 'reg.exe') return { status: 0, stdout: registry }
         if (command === 'powershell.exe') {
@@ -315,6 +325,54 @@ HKEY_CURRENT_USER\\Software\\TabbitBrowser
       },
     })
     assert.equal(detected.cliReady, true)
+    assert.equal(detected.cliPath, cliPath)
+    assert.equal(detected.recommendation, 'ready')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('prefers the Browser-owned Windows LocalAgent CLI over bundled helpers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tabbit-localagent-cli-'))
+  const userHome = join(root, 'home')
+  const localAppData = join(root, 'LocalAppData')
+  const installationPath = join(root, 'Tabbit')
+  const localAgentCli = join(localAppData, 'Tabbit', 'LocalAgent', 'bin', 'tabbit-cli.exe')
+  const bundledCli = join(installationPath, 'TabbitDance', 'tabbit-playwright-cli.exe')
+  await mkdir(join(localAgentCli, '..'), { recursive: true })
+  await writeFile(localAgentCli, 'launcher')
+  await mkdir(join(bundledCli, '..'), { recursive: true })
+  await writeFile(bundledCli, 'bundled')
+
+  const registry = `
+HKEY_CURRENT_USER\\Software\\Tabbit
+    DisplayName    REG_SZ    Tabbit
+    DisplayVersion    REG_SZ    1.9.22.0
+    InstallLocation    REG_SZ    ${installationPath}
+`
+  try {
+    const detected = await detectTabbit({
+      platform: 'win32',
+      userHome,
+      env: { LOCALAPPDATA: localAppData },
+      run(command) {
+        if (command === 'reg.exe') return { status: 0, stdout: registry }
+        if (command === 'powershell.exe') {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              ProcessId: 42,
+              Name: 'node.exe',
+              CommandLine: String.raw`"C:\Tabbit\TabbitDance\node.exe" "C:\Tabbit\TabbitDance\runtime\src\browser-runtime-service.mjs"`,
+            }),
+          }
+        }
+        return { status: 1, stdout: '' }
+      },
+    })
+    assert.equal(detected.cliReady, true)
+    assert.equal(detected.cliPath, localAgentCli)
+    assert.equal(detected.playwrightProcessRunning, true)
     assert.equal(detected.recommendation, 'ready')
   } finally {
     await rm(root, { recursive: true, force: true })
