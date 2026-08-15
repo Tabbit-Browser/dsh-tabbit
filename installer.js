@@ -286,6 +286,7 @@ function isTabbitRuntimeProcess(name, command) {
   const value = `${name ?? ''} ${command ?? ''}`
   return /(?:^|[\\/\s])tabbit-cli(?:\.cmd|\.exe)?(?:\s|$)/i.test(value)
     || /(?:^|[\\/\s])nodejs-playwright-runtime\.mjs(?:\s|$)/i.test(value)
+    || /(?:^|[\\/\s])browser-runtime-service\.mjs(?:\s|$)/i.test(value)
 }
 
 export function parseUnixProcessList(output) {

@@ -158,10 +158,15 @@ test('compares Tabbit versions against 1.9.0 numerically', () => {
 test('recognizes the persistent tabbit-cli runtime process', () => {
   const unix = parseUnixProcessList(`
     101 node /opt/tabbit/runtime/nodejs-playwright-runtime.mjs
-  102 Tabbit /Applications/Tabbit.app/Contents/MacOS/Tabbit
-  103 node /tmp/something-else.mjs
-`)
-  assert.deepEqual(unix, [{ pid: 101, name: 'node' }])
+    104 node /Applications/Tabbit Browser.app/Contents/Resources/TabbitDance/runtime/src/browser-runtime-service.mjs
+    105 node /Applications/Tabbit Browser.app/Contents/Resources/TabbitDance/runtime/src/browser-runtime-worker.mjs
+    102 Tabbit /Applications/Tabbit.app/Contents/MacOS/Tabbit
+    103 node /tmp/something-else.mjs
+  `)
+  assert.deepEqual(unix, [
+    { pid: 101, name: 'node' },
+    { pid: 104, name: 'node' },
+  ])
 
   const windows = parseWindowsProcessList(JSON.stringify([
     { ProcessId: 201, Name: 'tabbit-cli.exe', CommandLine: String.raw`C:\Users\User\.local\bin\tabbit-cli.exe nodejs` },
