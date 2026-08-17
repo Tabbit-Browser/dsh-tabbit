@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, mkdir, open, readdir, rename, rm } from 'node:fs/promises'
+import { access, mkdir, open, rename, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -225,9 +225,36 @@ export function detectWindowsInstallations({ run = spawnSync } = {}) {
     'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
     'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
   ]
+  const targetedKeys = roots.flatMap(root => (
+    ['Tabbit', 'Tabbit Browser'].map(name => `${root}\\${name}`)
+  ))
   const installations = []
   const seen = new Set()
 
+  const collect = (output) => {
+    for (const item of parseWindowsUninstallRegistry(output)) {
+      const key = `${item.name}\0${item.path ?? ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      installations.push(item)
+    }
+  }
+
+  for (const key of targetedKeys) {
+    for (const view of ['64', '32']) {
+      const result = run('reg.exe', ['query', key, `/reg:${view}`], {
+        encoding: 'utf8',
+        windowsHide: true,
+        maxBuffer: 16 * 1024 * 1024,
+      })
+      if (result.status === 0) collect(result.stdout)
+    }
+  }
+  if (installations.length > 0) return installations
+
+  // Installer technologies may use generated uninstall subkeys. Preserve the
+  // broad scan as a compatibility fallback when the stable well-known keys are
+  // absent.
   for (const root of roots) {
     for (const view of ['64', '32']) {
       const result = run('reg.exe', ['query', root, '/s', `/reg:${view}`], {
@@ -235,60 +262,23 @@ export function detectWindowsInstallations({ run = spawnSync } = {}) {
         windowsHide: true,
         maxBuffer: 16 * 1024 * 1024,
       })
-      if (result.status !== 0) continue
-      for (const item of parseWindowsUninstallRegistry(result.stdout)) {
-        const key = `${item.name}\0${item.path ?? ''}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        installations.push(item)
-      }
+      if (result.status === 0) collect(result.stdout)
     }
   }
   return installations
 }
 
-const CLI_FILE_PATTERN = /^tabbit-(?:playwright-)?cli(?:\.(?:cmd|exe))?$/i
-
-async function findBundledCli(root) {
-  if (!root) return []
-  let entries
-  try {
-    entries = await readdir(root, { withFileTypes: true })
-  } catch {
-    return []
-  }
-
-  const found = []
-  for (const entry of entries) {
-    const path = join(root, entry.name)
-    if (entry.isDirectory()) {
-      found.push(...await findBundledCli(path))
-    } else if (entry.isFile() && CLI_FILE_PATTERN.test(entry.name)) {
-      found.push(path)
-    }
-  }
-  return found
-}
-
-async function detectCli(userHome = homedir(), platform = process.platform, installations = []) {
-  const candidates = platform === 'win32'
-    ? [
-        join(userHome, '.local', 'bin', 'tabbit-cli.cmd'),
-        join(userHome, '.local', 'bin', 'tabbit-cli.exe'),
-        join(userHome, '.local', 'bin', 'tabbit-cli'),
-      ]
-    : [join(userHome, '.local', 'bin', 'tabbit-cli')]
-
-  for (const installation of installations) {
-    candidates.push(...await findBundledCli(installation.path))
-  }
-
-  for (const path of candidates) {
-    if (await exists(path, platform === 'win32' ? constants.F_OK : constants.X_OK)) {
-      return { ready: true, path }
-    }
-  }
-  return { ready: false }
+async function detectCli({
+  userHome = homedir(),
+  platform = process.platform,
+  env = process.env,
+} = {}) {
+  const path = platform === 'win32'
+    ? join(env.LOCALAPPDATA || join(userHome, 'AppData', 'Local'), 'Tabbit', 'LocalAgent', 'bin', 'tabbit-cli.exe')
+    : join(userHome, '.local', 'bin', 'tabbit-cli')
+  return await exists(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
+    ? { ready: true, path }
+    : { ready: false }
 }
 
 function numericVersion(version) {
@@ -311,9 +301,8 @@ export function isVersionAtLeast(version, minimum = MINIMUM_TABBIT_VERSION) {
 
 function isTabbitRuntimeProcess(name, command) {
   const value = `${name ?? ''} ${command ?? ''}`
-  return /(?:^|[\\/\s])tabbit-cli(?:\.cmd|\.exe)?(?:\s|$)/i.test(value)
-    || /(?:^|[\\/\s])nodejs-playwright-runtime\.mjs(?:\s|$)/i.test(value)
-    || /(?:^|[\\/\s])browser-runtime-service\.mjs(?:\s|$)/i.test(value)
+  return /(?:^|[\\/"'\s])browser-runtime-service\.mjs(?=$|["'\s])/i.test(value)
+    || /(?:^|[\\/"'\s])nodejs-playwright-runtime\.mjs(?=$|["'\s])/i.test(value)
 }
 
 export function parseUnixProcessList(output) {
@@ -348,7 +337,7 @@ export function detectTabbitPlaywrightProcesses({
   run = spawnSync,
 } = {}) {
   if (platform === 'win32') {
-    const script = 'Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress'
+    const script = `Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%browser-runtime-service.mjs%' OR CommandLine LIKE '%nodejs-playwright-runtime.mjs%'" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress`
     const result = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       encoding: 'utf8',
       windowsHide: true,
@@ -376,6 +365,7 @@ export function summarizeTabbitRuntime(playwrightProcesses) {
 export async function detectTabbit({
   platform = process.platform,
   userHome = homedir(),
+  env = process.env,
   run = spawnSync,
   minimumVersion = MINIMUM_TABBIT_VERSION,
 } = {}) {
@@ -384,7 +374,7 @@ export async function detectTabbit({
     : platform === 'win32'
       ? detectWindowsInstallations({ run })
       : []
-  const cli = await detectCli(userHome, platform, installations)
+  const cli = await detectCli({ userHome, platform, env })
   const supportedInstallations = installations.filter(item => (
     isVersionAtLeast(item.version, minimumVersion)
   ))
@@ -394,7 +384,7 @@ export async function detectTabbit({
   const runtime = summarizeTabbitRuntime(playwrightProcesses)
   const recommendation = supportedInstallations.length === 0
     ? 'download'
-    : runtime.running
+    : runtime.running && cli.ready
       ? 'ready'
       : 'restart-required'
   return {

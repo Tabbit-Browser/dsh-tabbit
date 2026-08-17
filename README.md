@@ -68,6 +68,11 @@ dsh web
 - `dsh-tool-jobs` 已为当前 Agent 提供后台任务控制和完成通知。
 - 当前 DSH profile 已提供运行在 Tabbit Browser 所在宿主机的 Bash/Shell 工具。
 - Shell 的执行环境可以访问 Browser-owned Runtime Service。
+- Windows 上 DSH 的 `read-only` 与 `workspace-write` 限制令牌无法写入 Runtime
+  命名管道。Skill 先正常执行 `tabbit-cli tasks` 连接探测；成功时完全不询问
+  权限。仅当 Browser、launcher 和 Runtime 进程均已检测到但连接返回
+  `BROWSER_RUNTIME_UNAVAILABLE` 时，才要求用户把当前 DSH 会话切换到 Full
+  Permission，并立即停止当前任务，不重试或继续浏览器操作。
 
 ## 范围
 
@@ -79,6 +84,10 @@ dsh web
 - 检查 `tabbit-cli` 常驻运行时；未运行时提醒用户重启一次 Tabbit。
 - 多个 Tabbit 实例同时运行时，仍判定 Runtime 可用；模型需根据 CLI 提示设置
   `TABBIT_PLAYWRIGHT_INSTANCE`，不会把实例选择歧义误报为 Runtime 未运行。
+- 诊断当前平台调用 CLI 所需的 DSH sandbox mode；Windows 返回
+  `cliSandboxMode: danger-full-access`，其他平台返回 `default`。
+- 按 Agent session 缓存成功的环境检查；仅在 Runtime/launcher 失败或安装变化后
+  通过 `refresh: true` 主动失效并重新检查。
 - 在两者均未安装或所有正式版版本过低时，通过 `ctx.jobs` 后台下载适配系统地区的正式版安装包。
 - 中国大陆使用 `tabbit.com` 国内版下载源，其他地区使用 `tabbit.ai` 国际版下载源。
 - 输出下载进度，完成后通知安装包绝对路径。

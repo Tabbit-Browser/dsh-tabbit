@@ -7,6 +7,17 @@ macOS:   ~/.local/bin/tabbit-cli
 Windows: %LOCALAPPDATA%\Tabbit\LocalAgent\bin\tabbit-cli.exe
 ```
 
+DSH's Windows `read-only` and `workspace-write` modes use a restricted token
+that cannot open the Browser Runtime Service named pipe for writing. Do not ask
+for Full Permission in advance. Invoke the CLI normally first.
+
+After `tabbit_browser_install` detects a supported Browser, launcher, and
+Runtime process, use `tabbit-cli tasks` as the connection probe. If it succeeds,
+continue without mentioning permissions. If it returns
+`BROWSER_RUNTIME_UNAVAILABLE`, ask the user to change the current DSH session
+permission to Full Permission, then stop the task. Do not retry the CLI or
+continue browser work.
+
 On macOS, invoke it as the first command token. For example:
 
 ```bash
@@ -16,7 +27,7 @@ EOF
 ```
 
 On Windows, use the native executable installed below `LOCALAPPDATA`. In
-PowerShell, pipe multiline JavaScript to it with the call operator:
+PowerShell, pipe multiline JavaScript to the launcher with the call operator:
 
 ```powershell
 @'
