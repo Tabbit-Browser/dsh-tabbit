@@ -66,6 +66,22 @@ x64, macOS Apple Silicon, or macOS Intel package. If a supported edition is
 installed but the runtime process is absent, it returns `restart-required`. It
 never asks for confirmation and never opens the downloaded installer.
 
+## Plugin updates
+
+The skill may load with a bundled plugin-update notice at the top. When it
+does, show the offered version and its changes to the user and ask whether to
+update now. If they agree, tell them to rerun the install command below over
+the current install, then restart the DSH session afterwards:
+
+```bash
+dsh plugin --profile web add github:Tabbit-Browser/dsh-plugin
+```
+
+If they decline, call `tabbit_plugin_update` with `dismiss` set to the offered
+version, then continue the task. When the skill loads without a notice, do not
+call `tabbit_plugin_update`: the plugin already checks for updates at most
+once a day and silently skips offline failures.
+
 ## Persistent task spaces
 
 Every call names a task space. The first call creates an isolated Playwright
