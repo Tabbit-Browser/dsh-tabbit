@@ -18,15 +18,27 @@ Before the first CLI command, read
 the exact launcher path documented there. The launcher must be the first command
 token on every invocation; do not wrap it with `env`, `time`, or `sh -lc`.
 Browser owns the Runtime Service.
+Invoke the launcher normally. Do not ask for Full Permission before a real CLI
+connection failure.
 
 ## Ensure Tabbit is available
 
-Before the first browser operation in a task, call `tabbit_browser_install`
-immediately. Do not ask the user for confirmation first. Do not narrate the
-individual checks or their order; report only the final environment result.
+Call `tabbit_browser_install` once before the first browser operation in a DSH
+agent session. A `ready` result remains valid for that whole session; do not call
+the tool again for later tasks. The tool also caches that result by agent
+session. After a CLI Runtime/launcher failure, browser installation, update, or
+restart, call `tabbit_browser_install` once with `refresh: true` to discard the
+cache and recheck. Do not narrate the individual checks or their order; report
+only the final environment result.
 
-- If it returns `ready`, tell the user that the environment check passed and
-  continue with the CLI workflow.
+- If it returns `ready`, run the platform reference's normal `tabbit-cli tasks`
+  connection probe. Only after that probe succeeds, tell the user that the
+  environment check passed and continue with the CLI workflow. Cache that
+  successful connection result for the rest of the agent session.
+- On Windows, if the probe returns `BROWSER_RUNTIME_UNAVAILABLE` while the
+  detection result reports the Browser, launcher, and Runtime process ready,
+  ask the user to change the current DSH session permission to Full Permission,
+  then stop the task. Do not retry the CLI or continue browser work.
 - If the result says that multiple Tabbit instances are running, do not ask
   the user to restart Tabbit and do not report the Runtime as unavailable. Use
   an instance ID from the CLI's selection error and set
@@ -238,5 +250,9 @@ If `tabbit-cli` is missing or not executable, follow
 extension.
 
 If the CLI reports `BROWSER_RUNTIME_UNAVAILABLE`, do not start a controller or
-connect to a Browser endpoint directly. Ask the user to restart Tabbit Browser
-once, then retry the CLI after they confirm it has restarted.
+connect to a Browser endpoint directly. On Windows, if the latest detection
+result reports the Browser, launcher, and Runtime process ready, ask the user to
+change the current DSH session permission to Full Permission, then stop the
+task. Do not retry the CLI or continue browser work. Otherwise, refresh the
+environment check with `tabbit_browser_install({refresh: true})`; ask the user
+to restart Tabbit Browser only if it reports `restart-required`.

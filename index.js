@@ -54,20 +54,50 @@ function stripFrontmatter(source) {
 export const name = 'tabbit-browser'
 export const inject = ['skills', 'tools', 'jobs']
 
+export function describeCliSandbox(platform = process.platform) {
+  if (platform === 'win32') {
+    return {
+      cliSandboxMode: 'default',
+      cliSandboxReason: 'Invoke tabbit-cli normally. Only if its Runtime connection probe returns BROWSER_RUNTIME_UNAVAILABLE while Tabbit Browser and the Runtime process are detected, ask the user to change the current DSH session to Full Permission and stop the task.',
+    }
+  }
+  return {
+    cliSandboxMode: 'default',
+    cliSandboxReason: 'The default DSH sandbox mode can invoke tabbit-cli on this platform.',
+  }
+}
+
+function withCliSandboxGuidance(message, platform) {
+  const diagnosis = describeCliSandbox(platform)
+  return {
+    ...diagnosis,
+    message,
+  }
+}
+
 export function apply(ctx) {
   ctx.skills.registerProvider(() => provider)
   registerInstallerTool(ctx)
 }
 
-function registerInstallerTool(ctx) {
+export function registerInstallerTool(ctx, {
+  detect = detectTabbit,
+  hostPlatform = process.platform,
+} = {}) {
   const activeJobs = new WeakMap()
+  const readyByOwner = new WeakMap()
 
   ctx.tools.register({
     name: 'tabbit_browser_install',
-    description: 'Check stable Tabbit editions, require version 1.9.0 or newer, and verify the tabbit-cli runtime process. Download the region-appropriate installer in the background when Tabbit is missing or outdated; otherwise report when the browser must be restarted once.',
+    description: 'Check stable Tabbit editions, require version 1.9.0 or newer, verify the tabbit-cli launcher and Runtime process, and diagnose how to perform the session-scoped CLI connection probe. A successful detection result is cached for the calling agent session; set refresh only after a Runtime/launcher failure or installation change. Download the region-appropriate installer in the background when Tabbit is missing or outdated; otherwise report when the browser must be restarted once.',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        refresh: {
+          type: 'boolean',
+          description: 'Discard this agent session\'s cached ready result and run every environment check again. Use only after a Runtime/launcher failure or installation change.',
+        },
+      },
       additionalProperties: false,
     },
     output: {
@@ -79,8 +109,14 @@ function registerInstallerTool(ctx) {
             enum: ['ready', 'restart-required', 'background'],
           },
           message: { type: 'string' },
+          cached: { type: 'boolean' },
           jobId: { type: 'string' },
           cliReady: { type: 'boolean' },
+          cliSandboxMode: {
+            type: 'string',
+            enum: ['default', 'danger-full-access'],
+          },
+          cliSandboxReason: { type: 'string' },
           minimumVersion: { type: 'string' },
           playwrightProcessRunning: { type: 'boolean' },
           playwrightInstanceCount: { type: 'integer' },
@@ -104,14 +140,25 @@ function registerInstallerTool(ctx) {
             },
           },
         },
-        required: ['status', 'message'],
+        required: ['status', 'message', 'cached', 'cliSandboxMode', 'cliSandboxReason'],
         additionalProperties: false,
       },
       render: (_args, value) => [{ type: 'text', text: value.message }],
     },
     isConcurrencySafe: () => true,
-    async execute(_args, exec) {
+    async execute(args = {}, exec) {
       const owner = exec.agent
+      if (owner && args.refresh === true) readyByOwner.delete(owner)
+      if (owner && args.refresh !== true) {
+        const cached = readyByOwner.get(owner)
+        if (cached) {
+          return {
+            ...cached,
+            cached: true,
+            message: 'Browser installation and Runtime-process detection reused this session\'s result. Run the normal tabbit-cli tasks connection probe to finish the environment check.',
+          }
+        }
+      }
       const existingJobId = owner ? activeJobs.get(owner) : undefined
       if (existingJobId) {
         try {
@@ -119,7 +166,8 @@ function registerInstallerTool(ctx) {
           if (snapshot.status === 'running' || snapshot.status === 'stopping') {
             return {
               status: 'background',
-              message: `Environment check failed: a Tabbit installer download is already running as ${existingJobId}.`,
+              ...withCliSandboxGuidance(`Environment check failed: a Tabbit installer download is already running as ${existingJobId}.`, hostPlatform),
+              cached: false,
               jobId: String(existingJobId),
             }
           }
@@ -128,7 +176,7 @@ function registerInstallerTool(ctx) {
         }
       }
 
-      const detected = await detectTabbit()
+      const detected = await detect()
       if (detected.recommendation === 'ready') {
         const versions = detected.supportedInstallations
           .map(item => `${item.name} ${item.version}`)
@@ -136,9 +184,10 @@ function registerInstallerTool(ctx) {
         const instanceNote = detected.playwrightRuntimeAmbiguous
           ? ` Multiple Tabbit instances are running (${detected.playwrightInstanceCount}); set TABBIT_PLAYWRIGHT_INSTANCE before invoking tabbit-cli.`
           : ''
-        return {
+        const result = {
           status: 'ready',
-          message: `Environment check passed. Tabbit is ready${versions ? ` (${versions})` : ''}.${instanceNote}`,
+          ...withCliSandboxGuidance(`Browser installation and Runtime-process detection passed${versions ? ` (${versions})` : ''}.${instanceNote} Run the normal tabbit-cli tasks connection probe to finish the environment check.`, detected.platform),
+          cached: false,
           cliReady: detected.cliReady,
           minimumVersion: detected.minimumVersion,
           playwrightProcessRunning: detected.playwrightProcessRunning,
@@ -146,6 +195,8 @@ function registerInstallerTool(ctx) {
           playwrightRuntimeAmbiguous: detected.playwrightRuntimeAmbiguous,
           installations: detected.installations,
         }
+        if (owner) readyByOwner.set(owner, result)
+        return result
       }
       if (detected.recommendation === 'restart-required') {
         const versions = detected.supportedInstallations
@@ -153,7 +204,8 @@ function registerInstallerTool(ctx) {
           .join(', ')
         return {
           status: 'restart-required',
-          message: `Environment check failed: ${versions} meets the minimum version ${detected.minimumVersion}, but the tabbit-cli Runtime is not running. Please restart Tabbit Browser once before using browser automation.`,
+          ...withCliSandboxGuidance(`Environment check failed: ${versions} meets the minimum version ${detected.minimumVersion}, but the tabbit-cli Runtime is not running. Please restart Tabbit Browser once before using browser automation.`, detected.platform),
+          cached: false,
           cliReady: detected.cliReady,
           minimumVersion: detected.minimumVersion,
           playwrightProcessRunning: false,
@@ -182,7 +234,8 @@ function registerInstallerTool(ctx) {
       if (owner) activeJobs.set(owner, jobId)
       return {
         status: 'background',
-        message: `Environment check failed: ${downloadReason} Started the region-appropriate Tabbit installer download as ${jobId}. DSH will report progress and notify you when the installer is ready.`,
+        ...withCliSandboxGuidance(`Environment check failed: ${downloadReason} Started the region-appropriate Tabbit installer download as ${jobId}. DSH will report progress and notify you when the installer is ready.`, detected.platform),
+        cached: false,
         jobId: String(jobId),
         cliReady: detected.cliReady,
         minimumVersion: detected.minimumVersion,
