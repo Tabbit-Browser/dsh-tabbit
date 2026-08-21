@@ -74,7 +74,7 @@ update now. If they agree, tell them to rerun the install command below over
 the current install, then restart the DSH session afterwards:
 
 ```bash
-dsh plugin --profile web add github:Tabbit-Browser/dsh-plugin
+dsh plugin --profile web add github:Tabbit-Browser/dsh-tabbit
 ```
 
 If they decline, call `tabbit_plugin_update` with `dismiss` set to the offered

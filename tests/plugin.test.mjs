@@ -157,7 +157,7 @@ test('prepends the plugin-update notice when a newer release exists', async () =
     /^> \*\*Plugin update available\*\*: tabbit-browser 0\.3\.0 \(installed 0\.2\.0\)/,
   )
   assert.match(skill.content, /New in 0\.3\.0: Added update checks\./)
-  assert.match(skill.content, /dsh plugin --profile web add github:Tabbit-Browser\/dsh-plugin/)
+  assert.match(skill.content, /dsh plugin --profile web add github:Tabbit-Browser\/dsh-tabbit/)
   assert.match(skill.content, /tabbit_plugin_update.*dismiss: "0\.3\.0"/)
   assert.match(skill.content, /# Tabbit Browser/)
 })

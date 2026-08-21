@@ -54,7 +54,7 @@ npm install -g @deepseek-ai/dsh
 ### 2. 安装 tabbit-browser 插件
 
 ```sh
-dsh plugin --profile web add github:Tabbit-Browser/dsh-plugin
+dsh plugin --profile web add github:Tabbit-Browser/dsh-tabbit
 ```
 
 ### 3. 启动 DSH

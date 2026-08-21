@@ -54,7 +54,7 @@ Run `dsh --version` again to confirm DSH works.
 ### 2. Install the tabbit-browser plugin
 
 ```sh
-dsh plugin --profile web add github:Tabbit-Browser/dsh-plugin
+dsh plugin --profile web add github:Tabbit-Browser/dsh-tabbit
 ```
 
 ### 3. Start DSH

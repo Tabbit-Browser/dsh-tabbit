@@ -7,7 +7,7 @@ const FETCH_TIMEOUT_MS = 1500
 const CHANGELOG_MAX_CHARS = 500
 // The raw CDN carries no GitHub API rate limit, which unauthenticated checks
 // from shared egress IPs would otherwise exhaust within the hour.
-const DEFAULT_CHANGELOG_URL = 'https://raw.githubusercontent.com/Tabbit-Browser/dsh-plugin/main/CHANGELOG.md'
+const DEFAULT_CHANGELOG_URL = 'https://raw.githubusercontent.com/Tabbit-Browser/dsh-tabbit/main/CHANGELOG.md'
 const PACKAGE_URL = new URL('./package.json', import.meta.url)
 
 let cachedLocalVersion
