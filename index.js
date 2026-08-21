@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createDownloadJob, detectTabbit } from './installer.js'
+import { checkPluginUpdate, dismissUpdate } from './update-check.js'
 
 const PROVIDER_NAME = 'tabbit-browser-bundled-skill'
 const SKILL_NAME = 'tabbit-browser'
@@ -26,23 +27,51 @@ const candidate = {
   locator: SKILL_URL,
 }
 
-const provider = {
-  name: PROVIDER_NAME,
-  list: () => Promise.resolve([candidate]),
-  async get(selected) {
-    if (selected.name !== SKILL_NAME) return undefined
-    const source = await readFile(SKILL_URL, 'utf8')
-    return {
-      name: SKILL_NAME,
-      description: SKILL_DESCRIPTION,
-      invocation: INVOCATION,
-      provider: PROVIDER_NAME,
-      source: 'bundled',
-      resourceBase: RESOURCE_BASE,
-      path: fileURLToPath(SKILL_URL),
-      content: stripFrontmatter(source),
-    }
-  },
+export function formatUpdateNotice({ currentVersion, latestVersion, changelog }) {
+  return [
+    `> **Plugin update available**: tabbit-browser ${latestVersion} (installed ${currentVersion}).`,
+    changelog ? `> New in ${latestVersion}: ${changelog}` : null,
+    '> Show the offered version and these changes to the user, then ask whether to update now.',
+    '> If they agree, tell them to rerun the install command below over the current install and restart the DSH session afterwards:',
+    '> ```bash',
+    '> dsh plugin --profile web add github:Tabbit-Browser/dsh-plugin',
+    '> ```',
+    `> If they decline, call \`tabbit_plugin_update\` with \`dismiss: "${latestVersion}"\`, then continue the task.`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+async function prependUpdateNotice(content, checkUpdate) {
+  let update
+  try {
+    update = await checkUpdate()
+  } catch {
+    return content
+  }
+  if (update?.status !== 'update-available') return content
+  return `${formatUpdateNotice(update)}\n\n${content}`
+}
+
+export function createSkillProvider({ checkUpdate = checkPluginUpdate } = {}) {
+  return {
+    name: PROVIDER_NAME,
+    list: () => Promise.resolve([candidate]),
+    async get(selected) {
+      if (selected.name !== SKILL_NAME) return undefined
+      const source = await readFile(SKILL_URL, 'utf8')
+      return {
+        name: SKILL_NAME,
+        description: SKILL_DESCRIPTION,
+        invocation: INVOCATION,
+        provider: PROVIDER_NAME,
+        source: 'bundled',
+        resourceBase: RESOURCE_BASE,
+        path: fileURLToPath(SKILL_URL),
+        content: await prependUpdateNotice(stripFrontmatter(source), checkUpdate),
+      }
+    },
+  }
 }
 
 function stripFrontmatter(source) {
@@ -75,9 +104,83 @@ function withCliSandboxGuidance(message, platform) {
   }
 }
 
-export function apply(ctx) {
-  ctx.skills.registerProvider(() => provider)
+export function apply(ctx, options = {}) {
+  ctx.skills.registerProvider(() => createSkillProvider(options))
   registerInstallerTool(ctx)
+  registerUpdateTool(ctx, options)
+}
+
+function messageForUpdate(update) {
+  if (update.status === 'update-available') {
+    const changes = update.changelog || 'see the release notes'
+    return `tabbit-browser ${update.latestVersion} is available (installed ${update.currentVersion}). New in this version: ${changes}. Ask the user whether to update now.`
+  }
+  if (update.status === 'current') {
+    return `The tabbit-browser plugin is up to date (${update.currentVersion}).`
+  }
+  return 'Could not determine the latest tabbit-browser plugin version. The check stays silent for a day before retrying.'
+}
+
+export function registerUpdateTool(ctx, {
+  checkUpdate = checkPluginUpdate,
+  dismiss = dismissUpdate,
+} = {}) {
+  ctx.tools.register({
+    name: 'tabbit_plugin_update',
+    description: 'Record that the user declined an offered tabbit-browser plugin version, or force a recheck of the latest plugin release. The skill already loads an update notice automatically when a newer version exists; call this tool only after the user declines an offered version, or after a plugin update or connectivity change.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dismiss: {
+          type: 'string',
+          description: 'The offered version the user declined. The skill stops announcing this version; a newer release is announced again.',
+        },
+        refresh: {
+          type: 'boolean',
+          description: 'Skip the daily cache and the failure backoff and check the latest release again.',
+        },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            enum: ['current', 'update-available', 'unknown', 'dismissed'],
+          },
+          message: { type: 'string' },
+          currentVersion: { type: 'string' },
+          latestVersion: { type: 'string' },
+          changelog: { type: 'string' },
+          dismissedVersion: { type: 'string' },
+        },
+        required: ['status', 'message'],
+        additionalProperties: false,
+      },
+      render: (_args, value) => [{ type: 'text', text: value.message }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args = {}) {
+      if (args.dismiss) {
+        await dismiss(args.dismiss)
+        return {
+          status: 'dismissed',
+          message: `Recorded that the user declined tabbit-browser ${args.dismiss}. The skill will stop announcing this version; a newer release will be announced again.`,
+          dismissedVersion: args.dismiss,
+        }
+      }
+      const update = await checkUpdate({ force: args.refresh === true })
+      return {
+        status: update.status,
+        message: messageForUpdate(update),
+        currentVersion: update.currentVersion,
+        ...(update.latestVersion ? { latestVersion: update.latestVersion } : {}),
+        ...(update.changelog ? { changelog: update.changelog } : {}),
+      }
+    },
+  })
 }
 
 export function registerInstallerTool(ctx, {
