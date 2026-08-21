@@ -12,7 +12,8 @@
     "installer.js",
     "cordis.patch.yml",
     "skills/**",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md"
   ],
   "scripts": {
     "test": "node --test"
