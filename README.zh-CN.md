@@ -54,6 +54,13 @@ npm install -g @deepseek-ai/dsh
 ### 2. 安装 tabbit-browser 插件
 
 ```sh
+dsh plugin --profile web add dsh-tabbit
+```
+
+这会安装 npm 包（预构建 tarball，走 CDN 分发）。如果无法访问 npm
+registry，可以回退到 GitHub 源：
+
+```sh
 dsh plugin --profile web add github:Tabbit-Browser/dsh-tabbit
 ```
 

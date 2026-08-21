@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Install and update commands now use the npm package (`dsh plugin add
+  dsh-tabbit`) as the primary route — prebuilt tarball, CDN-served, and
+  counted in npm download stats; the `github:` source remains documented as
+  a fallback.
+
 ## 0.2.1
 
 - Renamed the package to `dsh-tabbit` and published it to npm; updated all

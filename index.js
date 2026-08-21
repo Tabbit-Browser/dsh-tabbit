@@ -34,7 +34,7 @@ export function formatUpdateNotice({ currentVersion, latestVersion, changelog })
     '> Show the offered version and these changes to the user, then ask whether to update now.',
     '> If they agree, tell them to rerun the install command below over the current install and restart the DSH session afterwards:',
     '> ```bash',
-    '> dsh plugin --profile web add github:Tabbit-Browser/dsh-tabbit',
+    '> dsh plugin --profile web add dsh-tabbit',
     '> ```',
     `> If they decline, call \`tabbit_plugin_update\` with \`dismiss: "${latestVersion}"\`, then continue the task.`,
   ]

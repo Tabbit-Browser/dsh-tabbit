@@ -54,6 +54,13 @@ Run `dsh --version` again to confirm DSH works.
 ### 2. Install the tabbit-browser plugin
 
 ```sh
+dsh plugin --profile web add dsh-tabbit
+```
+
+This installs the npm package (prebuilt tarball, CDN-served). If the npm
+registry is unreachable, fall back to the GitHub source:
+
+```sh
 dsh plugin --profile web add github:Tabbit-Browser/dsh-tabbit
 ```
 
