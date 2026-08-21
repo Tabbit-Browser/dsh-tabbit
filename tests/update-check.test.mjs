@@ -7,7 +7,7 @@ import {
   checkPluginUpdate,
   compareVersions,
   dismissUpdate,
-  parseLatestRelease,
+  parseLatestChangelog,
   readCachedCheck,
   summarizeUpdate,
   truncateChangelog,
@@ -49,12 +49,28 @@ test('flattens and truncates release notes', () => {
   assert.ok(long.endsWith('…'))
 })
 
-test('parses the latest GitHub release payload', () => {
+test('parses the newest version section from the changelog', () => {
+  const markdown = [
+    '# Changelog',
+    '',
+    '## 0.3.0',
+    '',
+    '- Added update',
+    '  checks.',
+    '',
+    '## 0.2.0',
+    '',
+    '- Older release.',
+  ].join('\n')
   assert.deepEqual(
-    parseLatestRelease({ tag_name: 'v0.3.0', body: 'Added update\nchecks.' }),
-    { version: '0.3.0', changelog: 'Added update checks.' },
+    parseLatestChangelog(markdown),
+    { version: '0.3.0', changelog: '- Added update checks.' },
   )
-  assert.throws(() => parseLatestRelease({ body: 'no tag' }), /tag_name/)
+  assert.deepEqual(
+    parseLatestChangelog('## v0.3.0\n\nOnly section.\n'),
+    { version: '0.3.0', changelog: 'Only section.' },
+  )
+  assert.throws(() => parseLatestChangelog('# No version headings'), /heading/)
 })
 
 test('summarizes the update state', () => {

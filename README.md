@@ -12,7 +12,7 @@ A plugin for DeepSeek Harness (DSH) that gives the agent control over your Tabbi
 | --------- | ----------- |
 | `tabbit-browser` skill | The working guide for browser automation: persistent task spaces, locators and waits, screenshots, receipts and recovery. Discovered and loaded automatically with the plugin — no separate skill install. The model loads it via `skill({ name: "tabbit-browser" })` or `/tabbit-browser`. |
 | `tabbit_browser_install` tool | Environment preflight: detects installed stable Tabbit editions, requires version `1.9.0` or newer, and verifies the `tabbit-cli` resident runtime. When Tabbit is missing or outdated, it starts a DSH background job that downloads the region-appropriate installer. |
-| `tabbit_plugin_update` tool | Plugin update check: compares the installed plugin version with the latest GitHub release at most once a day, silently skips offline failures, and records a version the user declined. When a newer release exists, the skill loads with an update notice showing what the new version added. |
+| `tabbit_plugin_update` tool | Plugin update check: compares the installed plugin version with the published changelog at most once a day, silently skips offline failures, and records a version the user declined. When a newer release exists, the skill loads with an update notice showing what the new version added. |
 
 ## Installation
 
