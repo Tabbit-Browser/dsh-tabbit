@@ -12,7 +12,7 @@
 | ---- | ---- |
 | `tabbit-browser` skill | 浏览器自动化工作指南：持久化任务空间、locator 与等待、截图、回执与恢复。随插件安装自动发现和加载，无需单独安装。模型通过 `skill({ name: "tabbit-browser" })` 或 `/tabbit-browser` 加载。 |
 | `tabbit_browser_install` 工具 | 环境预检：检测已安装的正式版 Tabbit、要求版本 ≥ `1.9.0`、检查 `tabbit-cli` 常驻运行时；未安装或版本过低时，创建 DSH 后台任务按地区下载对应安装包。 |
-| `tabbit_plugin_update` 工具 | 插件更新检查：每天至多一次对比本地插件版本与 GitHub 最新 Release，离线失败时静默跳过，并可记录用户已拒绝的版本。存在新版本时，skill 会附带更新提示加载，展示新版本的新增功能。 |
+| `tabbit_plugin_update` 工具 | 插件更新检查：每天至多一次对比本地插件版本与仓库发布的 CHANGELOG，离线失败时静默跳过，并可记录用户已拒绝的版本。存在新版本时，skill 会附带更新提示加载，展示新版本的新增功能。 |
 
 ## 安装
 

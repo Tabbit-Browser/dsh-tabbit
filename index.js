@@ -127,7 +127,7 @@ export function registerUpdateTool(ctx, {
 } = {}) {
   ctx.tools.register({
     name: 'tabbit_plugin_update',
-    description: 'Record that the user declined an offered tabbit-browser plugin version, or force a recheck of the latest plugin release. The skill already loads an update notice automatically when a newer version exists; call this tool only after the user declines an offered version, or after a plugin update or connectivity change.',
+    description: 'Record that the user declined an offered tabbit-browser plugin version, or force a recheck of the published changelog. The skill already loads an update notice automatically when a newer version exists; call this tool only after the user declines an offered version, or after a plugin update or connectivity change.',
     parameters: {
       type: 'object',
       properties: {
