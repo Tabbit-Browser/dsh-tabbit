@@ -5,7 +5,9 @@ import { dirname, join } from 'node:path'
 const DAY_MS = 24 * 60 * 60 * 1000
 const FETCH_TIMEOUT_MS = 1500
 const CHANGELOG_MAX_CHARS = 500
-const DEFAULT_RELEASE_URL = 'https://api.github.com/repos/Tabbit-Browser/dsh-plugin/releases/latest'
+// The raw CDN carries no GitHub API rate limit, which unauthenticated checks
+// from shared egress IPs would otherwise exhaust within the hour.
+const DEFAULT_CHANGELOG_URL = 'https://raw.githubusercontent.com/Tabbit-Browser/dsh-plugin/main/CHANGELOG.md'
 const PACKAGE_URL = new URL('./package.json', import.meta.url)
 
 let cachedLocalVersion
@@ -38,10 +40,17 @@ export function truncateChangelog(text) {
   return `${value.slice(0, CHANGELOG_MAX_CHARS - 1).trimEnd()}…`
 }
 
-export function parseLatestRelease(payload) {
-  const version = numericVersion(payload?.tag_name)?.join('.')
-  if (!version) throw new Error('Latest release payload has no usable tag_name.')
-  return { version, changelog: truncateChangelog(payload.body) }
+export function parseLatestChangelog(markdown) {
+  const match = String(markdown ?? '').match(/^## +(v?\d+(?:\.\d+)+).*$/m)
+  if (!match) throw new Error('Latest changelog has no version heading.')
+  const version = numericVersion(match[1])?.join('.')
+  if (!version) throw new Error('Latest changelog heading has no usable version.')
+  const sectionStart = match.index + match[0].length
+  const nextSection = String(markdown).slice(sectionStart).search(/^## +/m)
+  const section = nextSection === -1
+    ? String(markdown).slice(sectionStart)
+    : String(markdown).slice(sectionStart, sectionStart + nextSection)
+  return { version, changelog: truncateChangelog(section) }
 }
 
 export function defaultCacheFile(env = process.env, platform = process.platform) {
@@ -78,20 +87,17 @@ async function writeCachedCheck(cacheFile, state) {
   await writeFile(cacheFile, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
 }
 
-export async function fetchLatestRelease({
-  url = process.env.TABBIT_PLUGIN_UPDATE_URL || DEFAULT_RELEASE_URL,
+export async function fetchLatestChangelog({
+  url = process.env.TABBIT_PLUGIN_UPDATE_URL || DEFAULT_CHANGELOG_URL,
   timeoutMs = FETCH_TIMEOUT_MS,
   fetchImpl = fetch,
 } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetchImpl(url, {
-      signal: controller.signal,
-      headers: { accept: 'application/vnd.github+json' },
-    })
+    const response = await fetchImpl(url, { signal: controller.signal })
     if (!response.ok) throw new Error(`Update check failed with HTTP ${response.status}.`)
-    return parseLatestRelease(await response.json())
+    return parseLatestChangelog(await response.text())
   } finally {
     clearTimeout(timer)
   }
@@ -144,7 +150,7 @@ async function fetchAndCacheRelease({ currentVersion, cached, cacheFile, now, fe
 export async function checkPluginUpdate({
   now = Date.now(),
   cacheFile = defaultCacheFile(),
-  fetchRelease = fetchLatestRelease,
+  fetchRelease = fetchLatestChangelog,
   readVersion = readLocalVersion,
   force = false,
 } = {}) {
