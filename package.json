@@ -1,7 +1,11 @@
 {
-  "name": "tabbit-browser",
+  "name": "dsh-tabbit",
   "version": "0.2.0",
   "description": "DSH bundle that packages the Tabbit Browser skill and background installer",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tabbit-Browser/dsh-tabbit.git"
+  },
   "type": "module",
   "main": "./index.js",
   "exports": {
