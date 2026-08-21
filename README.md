@@ -1,24 +1,33 @@
-# tabbit-browser
+# tabbit-browser for DeepSeek Harness
+
+**English** | [简体中文](README.zh-CN.md)
 
 ![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png?v=2)
 
-这是一个 Tabbit 浏览器为 Deepseek Harness 提供的一个 plugins。你可以在 Deepseek Harness 中安装这个插件，给  Deepseek Harness 提供控制 Tabbit 浏览器的能力。
+A plugin for DeepSeek Harness (DSH) that gives the agent control over your Tabbit Browser: real pages, real login state, and real interactions, driven through `tabbit-cli` — the task-isolated Playwright CLI owned by the browser itself. Use it for web automation, information extraction, QA, and benchmarks.
 
-## 安装与启动
+## What you get
 
-### 1. 检查并安装 DeepSeek Harness
+| Component | Description |
+| --------- | ----------- |
+| `tabbit-browser` skill | The working guide for browser automation: persistent task spaces, locators and waits, screenshots, receipts and recovery. Discovered and loaded automatically with the plugin — no separate skill install. The model loads it via `skill({ name: "tabbit-browser" })` or `/tabbit-browser`. |
+| `tabbit_browser_install` tool | Environment preflight: detects installed stable Tabbit editions, requires version `1.9.0` or newer, and verifies the `tabbit-cli` resident runtime. When Tabbit is missing or outdated, it starts a DSH background job that downloads the region-appropriate installer. |
 
-先检查本地是否已经安装 DSH：
+## Installation
+
+### 1. Check or install DeepSeek Harness
+
+Check whether DSH is already installed:
 
 ```sh
 dsh --version
 ```
 
-如果命令能够正常输出版本号，直接进入下一步。如果提示找不到命令，请根据操作系统安装。
+If the command prints a version number, continue to the next step. If it is not found, install it for your operating system.
 
 #### macOS
 
-安装 Node.js 20 或更高版本，然后安装 DSH：
+Install Node.js 20 or newer, then install DSH:
 
 ```sh
 brew install node
@@ -27,80 +36,70 @@ npm install -g @deepseek-ai/dsh
 
 #### Windows
 
-在 PowerShell 中安装 Node.js LTS：
+Install Node.js LTS in PowerShell:
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
 ```
 
-安装完成后重新打开 PowerShell，再安装 DSH：
+Reopen PowerShell after the installation, then install DSH:
 
 ```powershell
 npm install -g @deepseek-ai/dsh
 ```
 
-安装后再次运行 `dsh --version`，确认 DSH 可以正常使用。
+Run `dsh --version` again to confirm DSH works.
 
-### 2. 安装 tabbit-browser 插件
+### 2. Install the tabbit-browser plugin
 
 ```sh
 dsh plugin --profile web add github:Tabbit-Browser/dsh-plugin
 ```
 
-### 3. 启动 DSH
+### 3. Start DSH
 
 ```sh
 dsh web
 ```
 
-安装插件后，bundle 会自动加载 Skill Provider，模型可通过
-`skill({ name: "tabbit-browser" })` 或 `/tabbit-browser` 加载说明。Skill 会检查国内或
-国际正式版、要求至少一个版本达到 `1.9.0`，并检查 `tabbit-cli` 常驻运行时。
-没有安装或版本过低时，模型会直接创建 DSH 后台任务：macOS 读取系统地区，Windows
-调用系统地区 API；中国大陆下载国内正式版，其他地区或无法识别地区时下载国际正式版。
-安装包会保存到用户的 `Downloads` 目录，任务完成后 DSH 会通知安装包路径。
+## How it works
 
-## 前提
+After installation, the bundle automatically registers its skill provider. The model loads the skill via `skill({ name: "tabbit-browser" })` or `/tabbit-browser`. Before the first browser operation in a task, the skill calls `tabbit_browser_install`:
 
-- 必须安装 `1.9.0` 或更高版本的正式版 Tabbit 浏览器。国际版 `Tabbit` 和国内版
-  `Tabbit Browser` 均支持，安装任意一个即可。
-- 当前 DSH profile 已提供 `ctx.skills`、`ctx.tools`、`ctx.jobs` 以及对应模型工具。
-- `dsh-tool-jobs` 已为当前 Agent 提供后台任务控制和完成通知。
-- 当前 DSH profile 已提供运行在 Tabbit Browser 所在宿主机的 Bash/Shell 工具。
-- Shell 的执行环境可以访问 Browser-owned Runtime Service。
-- Windows 上 DSH 的 `read-only` 与 `workspace-write` 限制令牌无法写入 Runtime
-  命名管道。Skill 先正常执行 `tabbit-cli tasks` 连接探测；成功时完全不询问
-  权限。仅当 Browser、launcher 和 Runtime 进程均已检测到但连接返回
-  `BROWSER_RUNTIME_UNAVAILABLE` 时，才要求用户把当前 DSH 会话切换到 Full
-  Permission，并立即停止当前任务，不重试或继续浏览器操作。
+- **`ready`** — a stable Tabbit edition at `1.9.0` or newer is installed and the runtime is running; the agent continues with the `tabbit-cli` workflow.
+- **`restart-required`** — the installed version is sufficient, but the `tabbit-cli` runtime is not running; the user is asked to restart Tabbit Browser once.
+- **`background`** — no stable edition is installed, or none reaches `1.9.0`; the tool starts a DSH background job that reads the operating system's configured region (macOS reads the system locale, Windows calls the system region API) and downloads the matching stable installer: the domestic build from `tabbit.com` for mainland China, or the international build from `tabbit.ai` for every other or unknown region. It selects the right Windows x64, macOS Apple Silicon, or macOS Intel package, saves it to the user's `Downloads` folder, reports download progress, and notifies the absolute installer path on completion.
 
-## 范围
+The environment check also:
 
-本包负责：
+- Treats the runtime as available when multiple Tabbit instances are running; the agent sets `TABBIT_PLAYWRIGHT_INSTANCE` from the CLI's hint instead of reporting the instance ambiguity as an unavailable runtime.
+- Diagnoses the DSH sandbox mode required to invoke the CLI on the current platform: Windows reports `cliSandboxMode: danger-full-access`, other platforms report `default`.
+- Caches a successful environment check per agent session and re-checks only after a Runtime/launcher failure or an installation change, via `refresh: true`.
 
-- 随插件安装自动发现和加载 `tabbit-browser` Skill，无需单独安装 Skill。
-- 检测国际正式版 `Tabbit` 和国内正式版 `Tabbit Browser`。
-- 要求任一正式版版本不低于 `1.9.0`。
-- 检查 `tabbit-cli` 常驻运行时；未运行时提醒用户重启一次 Tabbit。
-- 多个 Tabbit 实例同时运行时，仍判定 Runtime 可用；模型需根据 CLI 提示设置
-  `TABBIT_PLAYWRIGHT_INSTANCE`，不会把实例选择歧义误报为 Runtime 未运行。
-- 诊断当前平台调用 CLI 所需的 DSH sandbox mode；Windows 返回
-  `cliSandboxMode: danger-full-access`，其他平台返回 `default`。
-- 按 Agent session 缓存成功的环境检查；仅在 Runtime/launcher 失败或安装变化后
-  通过 `refresh: true` 主动失效并重新检查。
-- 在两者均未安装或所有正式版版本过低时，通过 `ctx.jobs` 后台下载适配系统地区的正式版安装包。
-- 中国大陆使用 `tabbit.com` 国内版下载源，其他地区使用 `tabbit.ai` 国际版下载源。
-- 输出下载进度，完成后通知安装包绝对路径。
+## Requirements
 
-它不会检测开发版，不会自动打开 `.dmg` 或 `.exe`，也不提供
-`tabbit_browser_evaluate` 等原生浏览器工具。
+- A stable Tabbit Browser at version `1.9.0` or newer: either the international `Tabbit` or the domestic `Tabbit Browser` — installing either one is enough. If it is missing or outdated, the plugin downloads the installer for you.
+- The current DSH profile provides `ctx.skills`, `ctx.tools`, and `ctx.jobs` together with the corresponding model tools.
+- `dsh-tool-jobs` provides background job control and completion notifications for the current agent.
+- The current DSH profile provides a Bash/Shell tool running on the same host machine as Tabbit Browser.
+- The shell's execution environment can reach the Browser-owned Runtime Service.
+- On Windows, DSH's `read-only` and `workspace-write` restricted tokens cannot write to the Runtime named pipe. The skill first runs the normal `tabbit-cli tasks` connection probe and requests no permission at all when it succeeds. Only when the Browser, launcher, and Runtime processes are all detected but the connection returns `BROWSER_RUNTIME_UNAVAILABLE` does it ask the user to switch the current DSH session to Full Permission — and it then stops the task immediately, without retrying or continuing browser operations.
 
-如果 DSH 的 Bash 运行在 E2B、远程容器或无法访问本机 GUI Browser 的沙箱中，本 Skill
-不会使 Tabbit 自动化变得可用。
+## Notes and limitations
 
-## 开发验证
+- Mainland China uses the domestic `tabbit.com` download source; all other regions use the international `tabbit.ai` source.
+- The background download reports progress and notifies the absolute installer path when it finishes. It never opens the `.dmg`/`.exe` automatically.
+- Development builds are not detected.
+- The plugin does not provide native browser tools such as `tabbit_browser_evaluate`.
+- If DSH's Bash runs in a sandbox such as E2B or a remote container that cannot access the local GUI browser, this skill cannot make Tabbit automation work there.
+
+## Development
 
 ```sh
 npm test
 npm pack --dry-run
 ```
+
+## License
+
+MIT
