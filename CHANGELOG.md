@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Renamed the package to `dsh-tabbit` and published it to npm; updated all
+  remaining references (daily update-check changelog URL, install commands in
+  the plugin, skill, and READMEs) from `Tabbit-Browser/dsh-plugin` to
+  `Tabbit-Browser/dsh-tabbit`.
+
 ## 0.2.0
 
 - Added a daily plugin update check. Loading the skill compares the installed
