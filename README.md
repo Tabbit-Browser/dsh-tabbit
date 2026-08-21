@@ -10,7 +10,7 @@ A plugin for DeepSeek Harness (DSH) that gives the agent control over your Tabbi
 
 | Component | Description |
 | --------- | ----------- |
-| `tabbit-browser` skill | The working guide for browser automation: persistent task spaces, locators and waits, screenshots, receipts and recovery. The model loads it via `skill({ name: "tabbit-browser" })` or `/tabbit-browser`. |
+| `tabbit-browser` skill | The working guide for browser automation: persistent task spaces, locators and waits, screenshots, receipts and recovery. Discovered and loaded automatically with the plugin — no separate skill install. The model loads it via `skill({ name: "tabbit-browser" })` or `/tabbit-browser`. |
 | `tabbit_browser_install` tool | Environment preflight: detects installed stable Tabbit editions, requires version `1.9.0` or newer, and verifies the `tabbit-cli` resident runtime. When Tabbit is missing or outdated, it starts a DSH background job that downloads the region-appropriate installer. |
 
 ## Installation
@@ -70,6 +70,12 @@ After installation, the bundle automatically registers its skill provider. The m
 - **`restart-required`** — the installed version is sufficient, but the `tabbit-cli` runtime is not running; the user is asked to restart Tabbit Browser once.
 - **`background`** — no stable edition is installed, or none reaches `1.9.0`; the tool starts a DSH background job that reads the operating system's configured region (macOS reads the system locale, Windows calls the system region API) and downloads the matching stable installer: the domestic build from `tabbit.com` for mainland China, or the international build from `tabbit.ai` for every other or unknown region. It selects the right Windows x64, macOS Apple Silicon, or macOS Intel package, saves it to the user's `Downloads` folder, reports download progress, and notifies the absolute installer path on completion.
 
+The environment check also:
+
+- Treats the runtime as available when multiple Tabbit instances are running; the agent sets `TABBIT_PLAYWRIGHT_INSTANCE` from the CLI's hint instead of reporting the instance ambiguity as an unavailable runtime.
+- Diagnoses the DSH sandbox mode required to invoke the CLI on the current platform: Windows reports `cliSandboxMode: danger-full-access`, other platforms report `default`.
+- Caches a successful environment check per agent session and re-checks only after a Runtime/launcher failure or an installation change, via `refresh: true`.
+
 ## Requirements
 
 - A stable Tabbit Browser at version `1.9.0` or newer: either the international `Tabbit` or the domestic `Tabbit Browser` — installing either one is enough. If it is missing or outdated, the plugin downloads the installer for you.
@@ -77,6 +83,7 @@ After installation, the bundle automatically registers its skill provider. The m
 - `dsh-tool-jobs` provides background job control and completion notifications for the current agent.
 - The current DSH profile provides a Bash/Shell tool running on the same host machine as Tabbit Browser.
 - The shell's execution environment can reach the Browser-owned Runtime Service.
+- On Windows, DSH's `read-only` and `workspace-write` restricted tokens cannot write to the Runtime named pipe. The skill first runs the normal `tabbit-cli tasks` connection probe and requests no permission at all when it succeeds. Only when the Browser, launcher, and Runtime processes are all detected but the connection returns `BROWSER_RUNTIME_UNAVAILABLE` does it ask the user to switch the current DSH session to Full Permission — and it then stops the task immediately, without retrying or continuing browser operations.
 
 ## Notes and limitations
 

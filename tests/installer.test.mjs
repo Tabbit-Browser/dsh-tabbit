@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import test from 'node:test'
 import {
   createDownloadJob,
@@ -9,6 +9,7 @@ import {
   detectPlatformSpec,
   detectSystemRegion,
   detectTabbit,
+  detectWindowsInstallations,
   downloadInstaller,
   installerDistributionForRegion,
   installerUrl,
@@ -110,7 +111,7 @@ test('macOS detection recognizes only stable domestic and international apps', a
       await writeFile(join(directory, 'Info.plist'), 'fixture')
     }
     const run = (_command, args) => {
-      const appName = args[args.length - 1].split('/').at(-3)
+      const appName = basename(join(args.at(-1), '..', '..'))
       const key = args[1]
       if (key === 'CFBundleIdentifier') return { status: 0, stdout: bundles.get(appName) ?? '' }
       if (key === 'CFBundleShortVersionString') return { status: 0, stdout: '1.2.3' }
@@ -147,6 +148,46 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\TabbitDev
   assert.equal(found[0].executable, String.raw`C:\Users\User\AppData\Local\Tabbit\Application\Tabbit.exe`)
 })
 
+test('uses targeted Windows uninstall keys before the recursive fallback', () => {
+  const calls = []
+  const output = String.raw`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\Tabbit Browser
+    DisplayName    REG_SZ    Tabbit Browser
+    DisplayVersion    REG_SZ    1.9.22.0
+    InstallLocation    REG_SZ    C:\Tabbit Browser
+`
+  const found = detectWindowsInstallations({
+    run(_command, args) {
+      calls.push(args)
+      return args[1].endsWith('Tabbit Browser') && args.at(-1) === '/reg:64'
+        ? { status: 0, stdout: output }
+        : { status: 1, stdout: '' }
+    },
+  })
+
+  assert.deepEqual(found.map(item => item.name), ['Tabbit Browser'])
+  assert.equal(calls.some(args => args.includes('/s')), false)
+})
+
+test('falls back to recursive Windows uninstall scans for generated keys', () => {
+  const calls = []
+  const output = String.raw`HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\{generated}
+    DisplayName    REG_SZ    Tabbit
+    DisplayVersion    REG_SZ    1.9.22.0
+    InstallLocation    REG_SZ    C:\Tabbit
+`
+  const found = detectWindowsInstallations({
+    run(_command, args) {
+      calls.push(args)
+      return args.includes('/s')
+        ? { status: 0, stdout: output }
+        : { status: 1, stdout: '' }
+    },
+  })
+
+  assert.deepEqual(found.map(item => item.name), ['Tabbit'])
+  assert.equal(calls.some(args => args.includes('/s')), true)
+})
+
 test('compares Tabbit versions against 1.9.0 numerically', () => {
   assert.equal(isVersionAtLeast('1.9.0', '1.9.0'), true)
   assert.equal(isVersionAtLeast('1.9.18.0', '1.9.0'), true)
@@ -155,13 +196,13 @@ test('compares Tabbit versions against 1.9.0 numerically', () => {
   assert.equal(isVersionAtLeast(undefined, '1.9.0'), false)
 })
 
-test('recognizes the persistent tabbit-cli runtime process', () => {
+test('recognizes only persistent Browser Runtime Service processes', () => {
   const unix = parseUnixProcessList(`
-    101 node /opt/tabbit/runtime/nodejs-playwright-runtime.mjs
-    104 node /Applications/Tabbit Browser.app/Contents/Resources/TabbitDance/runtime/src/browser-runtime-service.mjs
-    105 node /Applications/Tabbit Browser.app/Contents/Resources/TabbitDance/runtime/src/browser-runtime-worker.mjs
+    101 node /opt/tabbit/runtime/browser-runtime-service.mjs
     102 Tabbit /Applications/Tabbit.app/Contents/MacOS/Tabbit
-    103 node /tmp/something-else.mjs
+    103 tabbit-cli /Users/user/.local/bin/tabbit-cli tasks
+    104 node /opt/tabbit/runtime/nodejs-playwright-runtime.mjs
+    105 node /tmp/something-else.mjs
   `)
   assert.deepEqual(unix, [
     { pid: 101, name: 'node' },
@@ -169,10 +210,16 @@ test('recognizes the persistent tabbit-cli runtime process', () => {
   ])
 
   const windows = parseWindowsProcessList(JSON.stringify([
-    { ProcessId: 201, Name: 'tabbit-cli.exe', CommandLine: String.raw`C:\Users\User\.local\bin\tabbit-cli.exe nodejs` },
+    {
+      ProcessId: 201,
+      Name: 'node.exe',
+      CommandLine: String.raw`"C:\Tabbit\node.exe" "C:\Tabbit\runtime\browser-runtime-service.mjs" --browser-transport="{}"`,
+    },
     { ProcessId: 202, Name: 'Tabbit.exe', CommandLine: String.raw`C:\Tabbit\Tabbit.exe` },
+    { ProcessId: 203, Name: 'tabbit-cli.exe', CommandLine: String.raw`C:\Tabbit\tabbit-cli.exe tasks` },
+    { ProcessId: 204, Name: 'tabbit-playwright-cli.exe', CommandLine: String.raw`C:\Tabbit\tabbit-playwright-cli.exe tasks` },
   ]))
-  assert.deepEqual(windows, [{ pid: 201, name: 'tabbit-cli.exe' }])
+  assert.deepEqual(windows, [{ pid: 201, name: 'node.exe' }])
 })
 
 test('treats multiple runtime processes as running but ambiguous', () => {
@@ -186,18 +233,82 @@ test('treats multiple runtime processes as running but ambiguous', () => {
   )
 })
 
+test('Windows readiness requires the public launcher under LOCALAPPDATA', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tabbit-windows-preflight-'))
+  const localAppData = join(root, 'redirected-local-app-data')
+  const launcher = join(localAppData, 'Tabbit', 'LocalAgent', 'bin', 'tabbit-cli.exe')
+  await mkdir(dirname(launcher), { recursive: true })
+  await writeFile(launcher, 'launcher')
+
+  let cimScript = ''
+  const run = (command, args) => {
+    if (command === 'reg.exe') {
+      return {
+        status: 0,
+        stdout: String.raw`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\Tabbit
+    DisplayName    REG_SZ    Tabbit
+    DisplayVersion    REG_SZ    1.9.22.0
+    InstallLocation    REG_SZ    C:\Tabbit
+`,
+      }
+    }
+    if (command === 'powershell.exe' && args.at(-1).includes('Get-CimInstance')) {
+      cimScript = args.at(-1)
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          ProcessId: 301,
+          Name: 'node.exe',
+          CommandLine: String.raw`"C:\Tabbit\node.exe" "C:\Tabbit\runtime\browser-runtime-service.mjs" --browser-transport="{}"`,
+        }),
+      }
+    }
+    return { status: 1, stdout: '' }
+  }
+
+  try {
+    const ready = await detectTabbit({
+      platform: 'win32',
+      userHome: join(root, 'profile'),
+      env: { LOCALAPPDATA: localAppData },
+      run,
+    })
+    assert.equal(ready.cliPath, launcher)
+    assert.equal(ready.playwrightProcessRunning, true)
+    assert.equal(ready.recommendation, 'ready')
+    assert.match(cimScript, /Get-CimInstance Win32_Process -Filter/)
+    assert.match(cimScript, /browser-runtime-service\.mjs/)
+
+    const missingLauncher = await detectTabbit({
+      platform: 'win32',
+      userHome: join(root, 'profile'),
+      env: { LOCALAPPDATA: join(root, 'missing-local-app-data') },
+      run,
+    })
+    assert.equal(missingLauncher.cliReady, false)
+    assert.equal(missingLauncher.playwrightProcessRunning, true)
+    assert.equal(missingLauncher.recommendation, 'restart-required')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('requires a supported stable version before checking the runtime process', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tabbit-preflight-'))
   const userHome = join(root, 'home')
   const contents = join(userHome, 'Applications', 'Tabbit.app', 'Contents')
+  const launcher = join(userHome, '.local', 'bin', 'tabbit-cli')
   await mkdir(contents, { recursive: true })
   await writeFile(join(contents, 'Info.plist'), 'fixture')
+  await mkdir(dirname(launcher), { recursive: true })
+  await writeFile(launcher, 'launcher')
+  await chmod(launcher, 0o700)
 
   let version = '1.8.19.0'
   let processChecks = 0
   const run = (command, args) => {
     if (command === '/usr/bin/plutil') {
-      const appName = args[args.length - 1].split('/').at(-3)
+      const appName = basename(join(args.at(-1), '..', '..'))
       if (appName !== 'Tabbit.app') return { status: 1, stdout: '' }
       return args[1] === 'CFBundleIdentifier'
         ? { status: 0, stdout: 'com.tabbit-ai.Tabbit' }
@@ -229,93 +340,6 @@ test('requires a supported stable version before checking the runtime process', 
       },
     })
     assert.equal(restart.recommendation, 'restart-required')
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test('checks the bundled CLI paths for both stable macOS editions', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'tabbit-cli-paths-'))
-  const userHome = join(root, 'home')
-  const installations = [
-    {
-      name: 'Tabbit',
-      path: join(root, 'Applications', 'Tabbit.app'),
-    },
-    {
-      name: 'Tabbit Browser',
-      path: join(root, 'Applications', 'Tabbit Browser.app'),
-    },
-  ]
-  try {
-    for (const installation of installations) {
-      await mkdir(join(installation.path, 'Contents'), { recursive: true })
-      await writeFile(join(installation.path, 'Contents', 'Info.plist'), 'fixture')
-      const cliPath = join(
-        installation.path,
-        'arbitrary',
-        installation.name === 'Tabbit' ? 'runtime' : 'tools',
-        installation.name === 'Tabbit' ? 'tabbit-playwright-cli' : 'tabbit-cli',
-      )
-      await mkdir(join(cliPath, '..'), { recursive: true })
-      await writeFile(cliPath, 'fixture')
-    }
-    const detected = await detectTabbit({
-      platform: 'darwin',
-      userHome,
-      run: (_command, args) => {
-        if (args[1] === 'CFBundleIdentifier') {
-          return {
-            status: 0,
-            stdout: args.at(-1).includes('Tabbit Browser.app')
-              ? 'com.tab-browser.Tabbit'
-              : 'com.tabbit-ai.Tabbit',
-          }
-        }
-        if (args[1] === 'CFBundleShortVersionString') return { status: 0, stdout: '1.9.22.0' }
-        return { status: 1, stdout: '' }
-      },
-    })
-    assert.equal(detected.cliReady, true)
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test('checks bundled CLI paths below a Windows installation root', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'tabbit-win-cli-'))
-  const installationPath = join(root, 'Tabbit Browser')
-  const cliPath = join(installationPath, 'vendor', 'runtime', 'tabbit-playwright-cli.exe')
-  await mkdir(join(cliPath, '..'), { recursive: true })
-  await writeFile(cliPath, 'fixture')
-
-  const registry = `
-HKEY_CURRENT_USER\\Software\\TabbitBrowser
-    DisplayName    REG_SZ    Tabbit Browser
-    DisplayVersion    REG_SZ    1.9.22.0
-    InstallLocation    REG_SZ    ${installationPath}
-`
-  try {
-    const detected = await detectTabbit({
-      platform: 'win32',
-      userHome: join(root, 'home'),
-      run(command) {
-        if (command === 'reg.exe') return { status: 0, stdout: registry }
-        if (command === 'powershell.exe') {
-          return {
-            status: 0,
-            stdout: JSON.stringify({
-              ProcessId: 42,
-              Name: 'node.exe',
-              CommandLine: 'browser-runtime-service.mjs',
-            }),
-          }
-        }
-        return { status: 1, stdout: '' }
-      },
-    })
-    assert.equal(detected.cliReady, true)
-    assert.equal(detected.recommendation, 'ready')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
