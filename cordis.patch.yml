@@ -1,3 +1,7 @@
+# The bundle package is published as `dsh-tabbit`; the loader entry must use
+# the npm package name so Cordis can resolve it. The plugin itself exports
+# `name: 'tabbit-browser'`, which is the service/skill name, not the package
+# specifier.
 - insert:
     - id: skill-tabbit-browser
-      name: tabbit-browser
+      name: dsh-tabbit

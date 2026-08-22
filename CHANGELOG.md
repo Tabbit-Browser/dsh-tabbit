@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+
+- Fixed the bundle's `cordis.patch.yml` loader entry to use the npm package
+  name `dsh-tabbit` instead of the non-existent package `tabbit-browser`. This
+  resolves the `Cannot find package 'tabbit-browser'` load failure that
+  affected fresh installs after the package was renamed in 0.2.1.
+
 ## 0.2.2
 
 - Install and update commands now use the npm package (`dsh plugin add

@@ -24,7 +24,7 @@ awesome-dsh-plugin registry as `Tabbit-Browser/dsh-tabbit`.
 npm version and GitHub Release must stay in lockstep:
 
 1. Bump `version` in `package.json` and add a `CHANGELOG.md` entry.
-2. `npm test` — 32/32 must pass.
+2. `npm test` — 34/34 must pass.
 3. Commit (`chore: release X.Y.Z`) and push to `main`.
 4. `npm publish`. The npm account has security-key-only 2FA, which the
    npm CLI cannot satisfy — publish with a granular access token
