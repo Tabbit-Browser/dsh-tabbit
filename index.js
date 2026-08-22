@@ -74,10 +74,15 @@ export function createSkillProvider({ checkUpdate = checkPluginUpdate } = {}) {
   }
 }
 
-function stripFrontmatter(source) {
-  if (!source.startsWith('---\n')) return source
-  const end = source.indexOf('\n---\n', 4)
-  return end === -1 ? source : source.slice(end + 5)
+export function stripFrontmatter(source) {
+  // Windows checkouts may carry CRLF line endings; tolerate both so the
+  // frontmatter is stripped regardless of the working-tree line ending style.
+  const newline = source.startsWith('---\r\n') ? '\r\n' : '\n'
+  const opening = `---${newline}`
+  if (!source.startsWith(opening)) return source
+  const closing = `${newline}---${newline}`
+  const end = source.indexOf(closing, opening.length)
+  return end === -1 ? source : source.slice(end + closing.length)
 }
 
 export const name = 'tabbit-browser'
@@ -220,6 +225,7 @@ export function registerInstallerTool(ctx, {
             enum: ['default', 'danger-full-access'],
           },
           cliSandboxReason: { type: 'string' },
+          cliPath: { type: 'string' },
           minimumVersion: { type: 'string' },
           playwrightProcessRunning: { type: 'boolean' },
           playwrightInstanceCount: { type: 'integer' },
@@ -289,9 +295,10 @@ export function registerInstallerTool(ctx, {
           : ''
         const result = {
           status: 'ready',
-          ...withCliSandboxGuidance(`Browser installation and Runtime-process detection passed${versions ? ` (${versions})` : ''}.${instanceNote} Run the normal tabbit-cli tasks connection probe to finish the environment check.`, detected.platform),
+          ...withCliSandboxGuidance(`Browser installation and Runtime-process detection passed${versions ? ` (${versions})` : ''}.${detected.cliPath ? ` CLI: ${detected.cliPath}.` : ''}${instanceNote} Run the normal tabbit-cli tasks connection probe to finish the environment check.`, detected.platform),
           cached: false,
           cliReady: detected.cliReady,
+          cliPath: detected.cliPath,
           minimumVersion: detected.minimumVersion,
           playwrightProcessRunning: detected.playwrightProcessRunning,
           playwrightInstanceCount: detected.playwrightInstanceCount,
@@ -310,6 +317,7 @@ export function registerInstallerTool(ctx, {
           ...withCliSandboxGuidance(`Environment check failed: ${versions} meets the minimum version ${detected.minimumVersion}, but the tabbit-cli Runtime is not running. Please restart Tabbit Browser once before using browser automation.`, detected.platform),
           cached: false,
           cliReady: detected.cliReady,
+          cliPath: detected.cliPath,
           minimumVersion: detected.minimumVersion,
           playwrightProcessRunning: false,
           playwrightInstanceCount: detected.playwrightInstanceCount,
@@ -341,6 +349,7 @@ export function registerInstallerTool(ctx, {
         cached: false,
         jobId: String(jobId),
         cliReady: detected.cliReady,
+        cliPath: detected.cliPath,
         minimumVersion: detected.minimumVersion,
         playwrightProcessRunning: false,
         playwrightInstanceCount: detected.playwrightInstanceCount,
