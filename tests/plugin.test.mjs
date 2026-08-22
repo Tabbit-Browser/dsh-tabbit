@@ -9,6 +9,7 @@ import {
   name,
   registerInstallerTool,
   registerUpdateTool,
+  stripFrontmatter,
 } from '../index.js'
 
 const UP_TO_DATE = async () => ({ status: 'current', currentVersion: '0.2.0' })
@@ -69,6 +70,7 @@ test('registers one bundled tabbit-browser skill and both tools', async () => {
   )
   assert.equal(tool.parameters.properties.refresh.type, 'boolean')
   assert.match(tool.description, /session-scoped CLI connection probe/)
+  assert.equal(tool.output.schema.properties.cliPath.type, 'string')
 
   const provider = factory({})
   const candidates = await provider.list()
@@ -135,6 +137,52 @@ test('caches successful Browser and Runtime-process detection for the whole agen
   assert.equal(second.cached, true)
   assert.match(second.message, /Runtime-process detection reused this session's result/)
   assert.equal(refreshed.cached, false)
+})
+
+test('strips skill frontmatter with LF or CRLF line endings', () => {
+  const lf = '---\nname: demo\ndescription: d\n---\n\n# Demo\nbody'
+  assert.equal(stripFrontmatter(lf), '\n# Demo\nbody')
+  const crlf = '---\r\nname: demo\r\ndescription: d\r\n---\r\n\r\n# Demo\r\nbody'
+  assert.equal(stripFrontmatter(crlf), '\r\n# Demo\r\nbody')
+  assert.equal(stripFrontmatter('no frontmatter'), 'no frontmatter')
+  assert.equal(stripFrontmatter('---\nnever closed'), '---\nnever closed')
+})
+
+test('reports the detected cliPath in the installer tool result', async () => {
+  let tool
+  registerInstallerTool({
+    tools: {
+      register(value) {
+        tool = value
+        return () => {}
+      },
+    },
+    jobs: {},
+  }, {
+    hostPlatform: 'win32',
+    async detect() {
+      return {
+        platform: 'win32',
+        recommendation: 'ready',
+        minimumVersion: '1.9.0',
+        cliReady: true,
+        cliPath: String.raw`C:\Users\User\AppData\Local\Tabbit\LocalAgent\bin\tabbit-cli.exe`,
+        playwrightProcessRunning: true,
+        playwrightInstanceCount: 1,
+        playwrightRuntimeAmbiguous: false,
+        installations: [],
+        supportedInstallations: [],
+      }
+    },
+  })
+
+  const agent = {}
+  const result = await tool.execute({}, { agent })
+  const cached = await tool.execute({}, { agent })
+
+  assert.equal(result.cliPath, String.raw`C:\Users\User\AppData\Local\Tabbit\LocalAgent\bin\tabbit-cli.exe`)
+  assert.match(result.message, /CLI: C:\\Users\\User\\AppData\\Local\\Tabbit\\LocalAgent\\bin\\tabbit-cli\.exe/)
+  assert.equal(cached.cliPath, result.cliPath)
 })
 
 test('does not load an unrelated candidate', async () => {
