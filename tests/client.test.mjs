@@ -23,8 +23,8 @@ function mockServices({ registeredNodes, slotRegistrations, sources }) {
       if (name === 'inputTriggers') {
         return { registerSource: (source) => { sources.push(source); return () => {} } }
       }
-      if (name === 'conversationEvents') {
-        return { register: (definition) => { registeredNodes.push(definition); return () => {} } }
+      if (name === 'uiConversation') {
+        return { events: { register: (definition) => { registeredNodes.push(definition); return () => {} } } }
       }
       if (name === 'slots') {
         return {
@@ -42,7 +42,7 @@ test('registers the @tab source and the tabbit-status chat node', () => {
   const fakeReact = { createElement: (type, props, ...children) => ({ type, props, children }), useState: () => [false, () => {}] }
   const client = loadClient(fakeReact)
   assert.equal(client.name, 'dsh-tabbit-client')
-  assert.deepEqual(client.inject, ['inputTriggers', 'conversationEvents', 'slots'])
+  assert.deepEqual(client.inject, ['inputTriggers', 'uiConversation', 'slots'])
 
   const registeredNodes = []
   const slotRegistrations = []
