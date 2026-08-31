@@ -74,6 +74,7 @@ import type {} from '@deepseek-ai/dsh-settings';
 import type {} from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-skill';
 import type {} from '@deepseek-ai/dsh-commands';
+import type {} from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 
 /* settings 命名空间 `tabbit` 下的四个配置项（用户可在 dsh 设置界面或 settings.yaml 改，热加载）。 */
@@ -461,6 +462,27 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/*
+ * /tabbit-info 结果的持久载体：整值、log-only 的会话事件（声明合并进
+ * dsh 的 SessionEventMap，同 dsh-commands 声明 command/run 的做法；新增
+ * 事件类型不需要日志格式版本号——旧运行时按 ignorable 词汇增长忽略它）。
+ *
+ * 为什么结果要落事件而不是只放进 CommandResult.text：dsh 的 web 客户端把
+ * command/run+command/done 折成的命令行节点视为“控制面内容”，【不会】让
+ * 空白会话脱离引导页——命令的 text 在空白会话里根本不渲染。而一条非
+ * command 的领域事件会折成普通聊天节点，激活会话视图，结果即时可见、且
+ * 刷新/重开后照常回放。命令返回值里带 sourceEventSeq 把两者关联起来
+ * （dsh CommandResult 的标准姿势，/compact 同款）。
+ *
+ * 结论行与明细分开存：结论（跟随用户语言）常显在状态卡上，明细
+ * （英文技术格式）展开才见。log-only 意味着它不进模型消息、不占上下文。
+ */
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'tabbit/status': { at: number; conclusion: string; report: string };
+  }
+}
+
 const MAX_LABEL_LENGTH = 48;
 
 /*
@@ -706,9 +728,20 @@ export function apply(ctx: Context): void {
     commandCtx.commands.register({
       name: 'tabbit-info',
       description: 'Show Tabbit Browser integration status: launcher, instances, tasks, permissions.',
-      handler: async () => {
+      handler: async ({ agent }) => {
         try {
-          return { kind: 'success', text: await renderStatus(service) };
+          const report = await renderStatus(service, readLocalePreference(ctx.settings));
+          const newline = report.indexOf('\n');
+          const conclusion = newline === -1 ? report : report.slice(0, newline);
+          // 先落 tabbit/status 事件再返回：web 客户端把它折成常显的状态卡
+          // （见 client/client.js），命令行节点只保留结论摘要。sourceEventSeq
+          // 指回这条事件，是 dsh 关联命令生命周期与领域投影的标准字段。
+          const event = agent.session.append('tabbit/status', {
+            at: Date.now(),
+            conclusion,
+            report,
+          });
+          return { kind: 'success', text: conclusion, sourceEventSeq: event.seq };
         } catch (error) {
           return { kind: 'error', text: `tabbit status failed: ${String((error as Error)?.message ?? error)}` };
         }
@@ -718,14 +751,73 @@ export function apply(ctx: Context): void {
 }
 
 /*
- * /tabbit-info 命令的输出渲染：launcher 状态、实例列表（在线/选中标记 + 多实例
- * 提示）、生效实例及来源、观看实例、权限设置、任务占用表。
+ * /tabbit-info 首行结论的用户语言。locale.preference 由 dsh 的 locale 插件
+ * 注册（zh/en，存用户设置文档）；未设置时 dsh 客户端跟随浏览器语言并兜底
+ * en——服务端看不到浏览器语言，因此同样兜底 en，与 dsh 的 FALLBACK_LOCALE
+ * 取向一致（浏览器没点名 shipped 语言时，读中文的可能性最低）。
  */
-async function renderStatus(service: TabbitService): Promise<string> {
+function readLocalePreference(settings: Context['settings']): 'zh' | 'en' {
+  const locale = settings.get('locale' as Parameters<typeof settings.get>[0]) as { preference?: string } | undefined;
+  return locale?.preference === 'zh' ? 'zh' : 'en';
+}
+
+/*
+ * 首行结论：用户在收起的命令行上能扫到的只有这一行，所以按“是否需要
+ * 用户采取行动”给结论——未安装提醒装/启动、未运行提醒启动、多实例时
+ * 告知会优先用最近使用的实例，正常时给一句可读的状态摘要。明细行保持
+ * 英文技术格式（可直接贴进 issue），不复述结论。
+ */
+function statusConclusion(
+  service: TabbitService,
+  settings: TabbitSettings,
+  launcher: string,
+  locale: 'zh' | 'en',
+): string {
+  const t = (zh: string, en: string) => (locale === 'zh' ? zh : en);
+  if (!existsSync(launcher)) {
+    return t(
+      '⚠️ 未找到 Tabbit 浏览器——请先启动（或安装）Tabbit Browser，再运行 /tabbit-info',
+      '⚠️ Tabbit Browser not found — launch (or install) Tabbit Browser first, then rerun /tabbit-info',
+    );
+  }
+  const onlineInstances = service.instances().filter((instance) => instance.online);
+  if (onlineInstances.length === 0) {
+    return t(
+      '⚠️ Tabbit 浏览器已安装但未在运行——请启动 Tabbit Browser 后重试',
+      '⚠️ Tabbit Browser is installed but not running — launch Tabbit Browser and retry',
+    );
+  }
+  if (!settings.instance && onlineInstances.length > 1) {
+    // 多实例不再当警告：正常使用中 dsh-web 的观看实例打点（viewer）几乎
+    // 总在，解析会落在"当前正在看 dsh 的那个实例"上；需要锁死再设
+    // tabbit.instance（明细行里保留了这条提示）。
+    return t(
+      `✅ 检测到 ${onlineInstances.length} 个在线 Tabbit 浏览器实例，会优先使用最近使用的实例`,
+      `✅ ${onlineInstances.length} Tabbit Browser instances online — preferring the most recently used one`,
+    );
+  }
+  const resolved = service.resolveExecutionInstance();
+  const execution =
+    resolved.id !== undefined
+      ? t(`${resolved.id}（来源 ${resolved.source}）`, `${resolved.id} (via ${resolved.source})`)
+      : t('唯一在线实例（auto）', 'the single online instance (auto)');
+  return t(
+    `✅ Tabbit 集成正常——${onlineInstances.length} 个实例在线，执行实例 ${execution}`,
+    `✅ Tabbit integration OK — ${onlineInstances.length} instance(s) online, executing on ${execution}`,
+  );
+}
+
+/*
+ * /tabbit-info 命令的输出渲染：首行结论（跟随用户语言），空行，然后是
+ * launcher 状态、实例列表（在线/选中标记 + 多实例提示）、生效实例及来源、
+ * 观看实例、权限设置、任务占用表。
+ */
+async function renderStatus(service: TabbitService, locale: 'zh' | 'en'): Promise<string> {
   const settings = service.currentSettings();
   const launcher = service.launcherPath();
   const lines: string[] = [];
-  lines.push(`launcher: ${launcher} ${existsSync(launcher) ? '(found)' : '(MISSING — install and launch Tabbit Browser once)'}`);
+  lines.push(statusConclusion(service, settings, launcher, locale));
+  lines.push('');
 
   const instances = service.instances();
   if (instances.length === 0) {

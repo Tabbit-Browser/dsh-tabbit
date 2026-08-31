@@ -1,7 +1,14 @@
 # Playwright recipes
 
-Use these recipes as the `code` argument to `tabbit_browser`. Each code block
-is an async function body: use it directly without adding an async wrapper.
+Use these code bodies as the `code` field of a bound `bootstrap` or `run`
+request. Each is an async function body: use it directly without adding an
+async wrapper. For name-addressed compatibility, send the same body to
+`<launcher> nodejs --task NAME` through a POSIX heredoc on macOS/Linux or the
+Windows code-input procedure in [platform invocation](platform-invocation.md).
+
+Each frame gets a fresh async wrapper, so lexical variables do not survive.
+Re-resolve Pages with `context.pages()`/`pages()`, or put intentional
+cross-frame state on `globalThis`.
 
 ## Contents
 
@@ -35,8 +42,9 @@ return {
 };
 ```
 
-Do not mark a call like this `read_only: true` — navigation changes browser
-state.
+Use `mutation: "possible"` because navigation changes browser state.
+Prefer `domcontentloaded`, or `commit` followed by an explicit readiness check.
+Reserve full `load` for tasks that depend on every page resource.
 
 ## Inspect visible controls and visual targets
 
@@ -49,33 +57,35 @@ return snapshot.slice(0, 6000);
 ```
 
 Use a fresh snapshot ref with `page.locator("aria-ref=e12")`. For iframe refs,
-Playwright accepts the returned `f1e2` form. Take a new snapshot after
-navigation or a substantial render — the next snapshot replaces the old ref
-set. For canvas or coordinate-only surfaces, use native `page.mouse`
-operations.
+Playwright accepts the returned `f1e2` form. Use a new snapshot after navigation
+or a substantial render. For canvas or coordinate-only surfaces, use native
+`page.mouse` operations; the evaluation receipt automatically records compact
+cross-frame and open-shadow-root hit diagnostics for mouse clicks.
 
 ## Work with canvas-backed rich editors
 
 Canvas-backed editors often keep usable toolbar buttons and editor state in the
 accessibility tree even when their visible DOM is flat or misleading. Inspect
-that tree before falling back to coordinates:
+that tree before using coordinates:
 
 ```js
 const before = await page.ariaSnapshot({mode: "ai", depth: 20, boxes: true});
 return before.slice(0, 6000);
 ```
 
-Use a ref from that snapshot directly:
+Use a ref from that snapshot directly. ARIA refs may include a frame prefix such
+as `f1e2`; native Playwright resolves either form:
 
 ```js
 await page.locator("aria-ref=e12").click();
 return (await page.ariaSnapshot({mode: "ai", depth: 20})).slice(0, 6000);
 ```
 
-Check state flags such as `[pressed]`, `[expanded]`, `[checked]`, and
-`[active]`. After inserting a table, verify that the active textbox for
-following content is outside the `table` subtree before typing. Use a
-screenshot only when the ARIA tree and visible surface still disagree.
+Take a new snapshot after each editor mode change because the next ARIA snapshot
+replaces the old ref set. Check state flags such as `[pressed]`, `[expanded]`,
+`[checked]`, and `[active]`. After inserting a table, verify that the active
+textbox for following content is outside the `table` subtree before typing. Use
+a screenshot only when the ARIA tree and visible surface still disagree.
 
 ## Fill and submit a form
 
@@ -191,20 +201,20 @@ already have fired.
 
 ## Handle same-tab or new-tab navigation
 
-If the page is known to navigate in the same tab, pair the action with the
-specific URL wait:
+Use native Playwright and install the waiter before the action:
 
 ```js
 await Promise.all([
-  page.waitForURL(/\/orders\/\d+$/, {timeout: 15000}),
+  page.waitForURL(/\/orders\/\d+$/),
   page.getByRole("button", {name: /create order/i}).click(),
 ]);
 return {title: await page.title(), url: page.url()};
 ```
 
-For a link with `target="_blank"`, use the popup recipe. Do not replace the
-requested click with `page.goto(linkHref)`; that fails to test real user
-interaction and can skip application behavior.
+For a popup, pair `context.waitForEvent("page")` with the click. Receipts report
+new pages but do not replace the active `page`. Do not replace the requested
+click with `page.goto(linkHref)`; that can skip application behavior. Close
+obsolete task-created pages with native `popup.close()`.
 
 ## Handle JavaScript dialogs
 
@@ -240,8 +250,7 @@ return {paid: true};
 ## Download and upload files
 
 Install the download waiter before clicking and save into the task artifact
-directory. Files under `artifactPath` are deleted when the task ends, so read
-or move them promptly:
+directory:
 
 ```js
 const [download] = await Promise.all([
@@ -255,6 +264,22 @@ return {
   suggestedFilename: download.suggestedFilename(),
   failure: await download.failure(),
 };
+```
+
+Chromium's built-in PDF viewer may open a page without emitting a download.
+Fetch the rendered link through the BrowserContext request client, validate the
+signature, and save it as an artifact:
+
+```js
+const link = page.getByRole("link", {name: /view pdf/i});
+const pdfUrl = new URL(await link.getAttribute("href"), page.url()).href;
+const response = await context.request.get(pdfUrl);
+assert(response.ok(), `PDF request failed: ${response.status()}`);
+const body = await response.body();
+assert.equal(body.subarray(0, 5).toString(), "%PDF-");
+const output = artifactPath("paper.pdf");
+await (await import("node:fs/promises")).writeFile(output, body);
+return {artifact: output, bytes: body.length, url: pdfUrl};
 ```
 
 For a normal file input, use `setInputFiles()`:
@@ -308,13 +333,12 @@ by index. Never use an unbounded loop waiting for a page condition.
 
 ## Capture evidence
 
-Use a plain filename with `artifactPath()`, and return the path inside a
-top-level `screenshots` array so it loads into your context as an image:
+Use a plain filename with `artifactPath()`:
 
 ```js
 const output = artifactPath("final-state.png");
-await page.screenshot({path: output, fullPage: true});
-return {screenshots: [output], title: await page.title(), url: page.url()};
+const screenshot = await page.screenshot({path: output, fullPage: true});
+return {screenshot, title: await page.title(), url: page.url()};
 ```
 
 Take screenshots as evidence or when visual state matters, not as the default
@@ -331,4 +355,4 @@ way to discover ordinary DOM controls.
 | click, then `waitForEvent("page")` | install the event waiter before the click with `Promise.all` |
 | return a Locator/Page/JSHandle | return a small JSON-safe object |
 | `page.goto(href)` when asked to click | call `locator.click()` and verify its result |
-| create a new task for the next step | reuse the same task and persistent `page`/`context` |
+| create a new browser for the next step | reuse the same task and persistent `page`/`context` |

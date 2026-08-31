@@ -1,9 +1,13 @@
 // 插件注册层的单元测试：installer/update 两个工具（经 DI 假件驱动三态与
-// 会话缓存）+ core 的随包 skill provider。自 0.2.x 世代的测试改造而来。
+// 会话缓存）+ core 的随包 skill provider + /tabbit-info 命令的事件落盘。
+// 自 0.2.x 世代的测试改造而来。
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import * as installer from '../lib/installer/index.js'
-import { skillProvider } from '../lib/core/index.js'
+import { skillProvider, apply as applyCore } from '../lib/core/index.js'
 
 const SUPPORTED = {
   installations: [{ name: 'Tabbit', edition: 'international', channel: 'stable', version: '1.9.2' }],
@@ -179,6 +183,73 @@ test('the update tool defers to the browser for managed (preinstalled) copies', 
   assert.equal(checked, 0)
 })
 
+test('/tabbit-info 落一条 tabbit/status 会话事件并把它指给命令结果', async () => {
+  // 封闭性：HOME 指到空目录 → 实例注册表读不到（instances 为空、无 CLI
+  // 调用），settings 里 launcherPath 再指到不存在的路径 → 结论走“未安装”
+  // 分支。整个 handler 不碰真实浏览器/文件系统。
+  const emptyHome = await mkdtemp(join(tmpdir(), 'tabbit-test-home-'))
+  const savedHome = process.env.HOME
+  process.env.HOME = emptyHome
+  try {
+    const commands = []
+    const ctx = {
+      settings: {
+        register: () => ({
+          get: () => ({
+            instance: '',
+            launcherPath: join(emptyHome, 'missing-tabbit-cli'),
+            pageAccess: 'ask',
+            intranetFetch: 'ask',
+          }),
+        }),
+        get: () => undefined, // locale 未设置 → 兜底 en
+      },
+      skills: { registerProvider() {} },
+      systemPrompt: { section() {} },
+      commands: { register: definition => { commands.push(definition); return () => {} } },
+      provide() {},
+      on() {},
+      effect(fn) { const cleanup = fn(); return () => cleanup?.() },
+      inject(_names, callback) { callback(ctx) },
+      logger: { info() {}, warn() {} },
+    }
+    applyCore(ctx)
+
+    const info = commands.find(definition => definition.name === 'tabbit-info')
+    assert.ok(info, 'tabbit-info command registered')
+
+    const appended = []
+    const session = {
+      append(type, data) {
+        appended.push({ type, data })
+        return { type, seq: appended.length - 1 }
+      },
+    }
+    const result = await info.handler({
+      agent: { session },
+      rawInput: '',
+      signal: new AbortController().signal,
+    })
+
+    // 事件：一条整值 tabbit/status，结论与完整报告分开存，时间戳为数字。
+    assert.equal(appended.length, 1)
+    assert.equal(appended[0].type, 'tabbit/status')
+    const { at, conclusion, report } = appended[0].data
+    assert.equal(typeof at, 'number')
+    assert.match(conclusion, /^\u26a0\ufe0f Tabbit Browser not found/u)
+    assert.ok(report.startsWith(conclusion + '\n'))
+    assert.match(report, /instances: none registered/u)
+
+    // 命令返回：结论行做文本兑底，sourceEventSeq 指回刚才那条事件。
+    assert.equal(result.kind, 'success')
+    assert.equal(result.text, conclusion)
+    assert.equal(result.sourceEventSeq, 0)
+  } finally {
+    if (savedHome === undefined) delete process.env.HOME
+    else process.env.HOME = savedHome
+  }
+})
+
 test('serves one bundled tabbit skill from SKILL.md frontmatter', async () => {
   // 置托管环境变量让 get() 的更新检查短路（不读缓存、不发网络请求），
   // 保证本测试确定性；用完恢复。
@@ -195,14 +266,18 @@ test('serves one bundled tabbit skill from SKILL.md frontmatter', async () => {
     assert.equal(candidate.source, 'bundled')
     assert.equal(candidate.rank, 600)
     assert.deepEqual(candidate.invocation, { modelInvocable: true, userInvocable: true })
-    assert.match(candidate.description, /tabbit_browser/)
+    // 新版 skill 讲的是 tabbit-cli 的调用方式（persistent / nodejs --task），
+    // 不再围绕 tabbit_browser 工具行文。
+    assert.match(candidate.description, /Tabbit Browser/)
+    assert.match(candidate.description, /never switch browser backends/)
     assert.match(candidate.resourceBase.path, /skills[\\/]tabbit[\\/]$/)
 
     assert.equal(await skillProvider.get({ name: 'other-skill' }), undefined)
 
     const skill = await skillProvider.get({ name: 'tabbit' })
-    assert.match(skill.content, /^# Tabbit Browser operation/m)
-    assert.match(skill.content, /## Plugin updates/)
+    assert.match(skill.content, /^# Tabbit$/m)
+    assert.match(skill.content, /## Choose invocation/)
+    assert.match(skill.content, /## Persistent workspace/)
     assert.doesNotMatch(skill.content, /^---$/m)
     assert.doesNotMatch(skill.content, /Plugin update available/)
   } finally {
