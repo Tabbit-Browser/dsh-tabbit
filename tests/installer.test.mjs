@@ -1,16 +1,21 @@
+// 安装检测/下载层的单元测试。自 0.2.x 世代（github:Tabbit-Browser/dsh-tabbit）
+// 随实现一起移植；launcher 发现改测本包的 defaultLauncherPath（0.2.x 的
+// detectCli 职责已并入 runtime/instances.ts）。
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import test from 'node:test'
 import {
   createDownloadJob,
+  downloadInstaller,
+} from '../lib/installer/download.js'
+import {
   detectMacInstallations,
   detectPlatformSpec,
   detectSystemRegion,
-  detectTabbit,
+  detectTabbitRuntimeProcesses,
   detectWindowsInstallations,
-  downloadInstaller,
   installerDistributionForRegion,
   installerUrl,
   isVersionAtLeast,
@@ -19,7 +24,8 @@ import {
   parseWindowsProcessList,
   parseWindowsUninstallRegistry,
   summarizeTabbitRuntime,
-} from '../installer.js'
+} from '../lib/installer/detect.js'
+import { defaultLauncherPath } from '../lib/runtime/instances.js'
 
 test('maps supported platforms and detects Apple Silicon under Rosetta', () => {
   assert.deepEqual(
@@ -53,7 +59,7 @@ test('maps supported platforms and detects Apple Silicon under Rosetta', () => {
   )
 })
 
-test('selects domestic and international DSH installer endpoints by region', () => {
+test('selects domestic and international installer endpoints by region', () => {
   const spec = { platform: 'mac', arch: 'ARM_64' }
   const domestic = new URL(installerUrl(spec, installerDistributionForRegion('CN')))
   const international = new URL(installerUrl(spec, installerDistributionForRegion('US')))
@@ -222,6 +228,43 @@ test('recognizes only persistent Browser Runtime Service processes', () => {
   assert.deepEqual(windows, [{ pid: 201, name: 'node.exe' }])
 })
 
+test('issues the platform-specific runtime process query', () => {
+  let cimScript = ''
+  const windows = detectTabbitRuntimeProcesses({
+    platform: 'win32',
+    run(command, args) {
+      assert.equal(command, 'powershell.exe')
+      cimScript = args.at(-1)
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          ProcessId: 301,
+          Name: 'node.exe',
+          CommandLine: String.raw`"C:\Tabbit\node.exe" "C:\Tabbit\runtime\browser-runtime-service.mjs"`,
+        }),
+      }
+    },
+  })
+  assert.deepEqual(windows, [{ pid: 301, name: 'node.exe' }])
+  assert.match(cimScript, /Get-CimInstance Win32_Process -Filter/)
+  assert.match(cimScript, /browser-runtime-service\.mjs/)
+
+  const unix = detectTabbitRuntimeProcesses({
+    platform: 'darwin',
+    run(command, args) {
+      assert.equal(command, 'ps')
+      assert.deepEqual(args, ['-axo', 'pid=,comm=,args='])
+      return { status: 0, stdout: '42 node /opt/runtime/nodejs-playwright-runtime.mjs\n' }
+    },
+  })
+  assert.deepEqual(unix, [{ pid: 42, name: 'node' }])
+
+  assert.deepEqual(
+    detectTabbitRuntimeProcesses({ platform: 'darwin', run: () => ({ status: 1, stdout: '' }) }),
+    [],
+  )
+})
+
 test('treats multiple runtime processes as running but ambiguous', () => {
   assert.deepEqual(
     summarizeTabbitRuntime([{ pid: 101 }, { pid: 102 }, { pid: 103 }]),
@@ -233,113 +276,30 @@ test('treats multiple runtime processes as running but ambiguous', () => {
   )
 })
 
-test('Windows readiness requires the public launcher under LOCALAPPDATA', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'tabbit-windows-preflight-'))
-  const localAppData = join(root, 'redirected-local-app-data')
-  const launcher = join(localAppData, 'Tabbit', 'LocalAgent', 'bin', 'tabbit-cli.exe')
-  await mkdir(dirname(launcher), { recursive: true })
-  await writeFile(launcher, 'launcher')
-
-  let cimScript = ''
-  const run = (command, args) => {
-    if (command === 'reg.exe') {
-      return {
-        status: 0,
-        stdout: String.raw`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\Tabbit
-    DisplayName    REG_SZ    Tabbit
-    DisplayVersion    REG_SZ    1.9.22.0
-    InstallLocation    REG_SZ    C:\Tabbit
-`,
-      }
-    }
-    if (command === 'powershell.exe' && args.at(-1).includes('Get-CimInstance')) {
-      cimScript = args.at(-1)
-      return {
-        status: 0,
-        stdout: JSON.stringify({
-          ProcessId: 301,
-          Name: 'node.exe',
-          CommandLine: String.raw`"C:\Tabbit\node.exe" "C:\Tabbit\runtime\browser-runtime-service.mjs" --browser-transport="{}"`,
-        }),
-      }
-    }
-    return { status: 1, stdout: '' }
-  }
-
+test('discovers the launcher per platform, preferring the renamed tabbit-cli', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tabbit-launcher-'))
   try {
-    const ready = await detectTabbit({
-      platform: 'win32',
-      userHome: join(root, 'profile'),
-      env: { LOCALAPPDATA: localAppData },
-      run,
-    })
-    assert.equal(ready.cliPath, launcher)
-    assert.equal(ready.playwrightProcessRunning, true)
-    assert.equal(ready.recommendation, 'ready')
-    assert.match(cimScript, /Get-CimInstance Win32_Process -Filter/)
-    assert.match(cimScript, /browser-runtime-service\.mjs/)
+    // Windows：固定在 LOCALAPPDATA 下，不做存在性探测。
+    assert.equal(
+      defaultLauncherPath({ platform: 'win32', env: { LOCALAPPDATA: String.raw`C:\Users\U\AppData\Local` }, userHome: 'C:\\Users\\U' }),
+      join(String.raw`C:\Users\U\AppData\Local`, 'Tabbit', 'LocalAgent', 'bin', 'tabbit-cli.exe'),
+    )
 
-    const missingLauncher = await detectTabbit({
-      platform: 'win32',
-      userHome: join(root, 'profile'),
-      env: { LOCALAPPDATA: join(root, 'missing-local-app-data') },
-      run,
-    })
-    assert.equal(missingLauncher.cliReady, false)
-    assert.equal(missingLauncher.playwrightProcessRunning, true)
-    assert.equal(missingLauncher.recommendation, 'restart-required')
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
+    const bin = join(root, '.local', 'bin')
+    await mkdir(bin, { recursive: true })
+    const modern = join(bin, 'tabbit-cli')
+    const legacy = join(bin, 'tabbit-playwright')
 
-test('requires a supported stable version before checking the runtime process', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'tabbit-preflight-'))
-  const userHome = join(root, 'home')
-  const contents = join(userHome, 'Applications', 'Tabbit.app', 'Contents')
-  const launcher = join(userHome, '.local', 'bin', 'tabbit-cli')
-  await mkdir(contents, { recursive: true })
-  await writeFile(join(contents, 'Info.plist'), 'fixture')
-  await mkdir(dirname(launcher), { recursive: true })
-  await writeFile(launcher, 'launcher')
-  await chmod(launcher, 0o700)
+    // 两个都不存在：返回新名（报错信息指向当前正确的路径）。
+    assert.equal(defaultLauncherPath({ platform: 'darwin', env: {}, userHome: root }), modern)
 
-  let version = '1.8.19.0'
-  let processChecks = 0
-  const run = (command, args) => {
-    if (command === '/usr/bin/plutil') {
-      const appName = basename(join(args.at(-1), '..', '..'))
-      if (appName !== 'Tabbit.app') return { status: 1, stdout: '' }
-      return args[1] === 'CFBundleIdentifier'
-        ? { status: 0, stdout: 'com.tabbit-ai.Tabbit' }
-        : { status: 0, stdout: version }
-    }
-    if (command === 'ps') {
-      processChecks += 1
-      return { status: 0, stdout: '42 node /opt/runtime/nodejs-playwright-runtime.mjs\n' }
-    }
-    return { status: 1, stdout: '' }
-  }
+    // 只有旧名：回退旧名。
+    await writeFile(legacy, 'legacy shim')
+    assert.equal(defaultLauncherPath({ platform: 'darwin', env: {}, userHome: root }), legacy)
 
-  try {
-    const outdated = await detectTabbit({ platform: 'darwin', userHome, run })
-    assert.equal(outdated.recommendation, 'download')
-    assert.equal(processChecks, 0)
-
-    version = '1.9.0'
-    const ready = await detectTabbit({ platform: 'darwin', userHome, run })
-    assert.equal(ready.recommendation, 'ready')
-    assert.equal(ready.playwrightProcessRunning, true)
-
-    const restart = await detectTabbit({
-      platform: 'darwin',
-      userHome,
-      run(command, args) {
-        const result = run(command, args)
-        return command === 'ps' ? { status: 0, stdout: '' } : result
-      },
-    })
-    assert.equal(restart.recommendation, 'restart-required')
+    // 新旧并存：优先新名。
+    await writeFile(modern, 'modern shim')
+    assert.equal(defaultLauncherPath({ platform: 'darwin', env: {}, userHome: root }), modern)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

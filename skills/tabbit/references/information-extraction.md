@@ -15,10 +15,10 @@ answer.
 
 ## Realm boundary
 
-The CLI heredoc runs in A's persistent **Node realm**. It owns Playwright
-objects, task globals, filesystem access, and the final returned value. The
-website runs in the **page realm**. It owns `document`, `window`, DOM nodes, and
-application JavaScript.
+The `tabbit_browser` tool's `code` argument runs in a persistent **Node
+realm**. It owns Playwright objects, task globals, filesystem access, and the
+final returned value. The website runs in the **page realm**. It owns
+`document`, `window`, DOM nodes, and application JavaScript.
 
 Use Locators from the Node realm for normal semantic content. Use
 `page.evaluate(fn, argument)` when a DOM-only computation is materially more
@@ -150,6 +150,7 @@ return {
 };
 ```
 
-If raw data still exceeds the inline limit, let the runtime create a resource
-and follow `runtime-recovery.md`; do not print the entire resource when a
-summary answers the request.
+If the raw return value still exceeds the inline limit, the tool result comes
+back with `truncated: true` (and a smaller `resultText` prefix) instead of the
+full value — see `runtime-recovery.md`. Narrow what you return (filter,
+aggregate, cap length) rather than retrying the same call unchanged.

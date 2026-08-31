@@ -1,7 +1,14 @@
 # Interaction helpers
 
-These additive helpers live in the persistent Node evaluation realm as the
-frozen `tabbit` global. They do not replace native Playwright APIs.
+Newer Tabbit Browser builds expose a frozen `tabbit` global inside the
+persistent Node realm that `tabbit_browser` code runs in. Its helpers add
+bounded observation and safer interaction on top of native Playwright APIs —
+they do not replace them. On older browsers the global may be absent; feature-
+check once per task before relying on it:
+
+```js
+return {hasHelpers: typeof tabbit !== "undefined"};
+```
 
 ## `tabbit.observe(options)`
 
@@ -24,28 +31,30 @@ host is non-actionable.
 
 `tabbit.focusInfo()` follows focus through child frames and open shadow roots,
 returning role/name/type/editability, visibility, rectangle, and selection.
-Call it before keyboard input.
+Call it before keyboard or bulk input.
 
 `tabbit.hitTest(locator)` reports the element at the locator's center across
 frames. `tabbit.hitTest({x, y})` checks a main-frame viewport point. Call it
 before coordinate input and treat mismatches as a reason to re-observe.
 
-## `tabbit.actionability(locator)` and `tabbit.safeClick(locator, options)`
+## `tabbit.actionability(locator)`
 
-`tabbit.actionability()` verifies the target inside its owner frame and every
-iframe host up to the main page. It reports target visibility, event reception,
-viewport intersection, frame identity, and blockers such as an `occludedBy`
-element. `tabbit.safeClick()` runs that check immediately before a normal
-Playwright locator click and throws without clicking when the target or any
-frame host is non-actionable.
+Verifies the target inside its owner frame and every iframe host up to the
+main page. It reports target visibility, event reception, viewport
+intersection, frame identity, and blockers such as an `occludedBy` element.
+For targets inside frames or beneath overlays, check actionability first and
+only then perform the normal Playwright `locator.click()`; when the report
+says the target or a frame host is non-actionable, re-observe instead of
+clicking anyway.
 
 ## `tabbit.pasteText(text, options)`
 
 Dispatches a task-local synthetic paste, then uses an editable fallback when
 needed. It never reads or overwrites the user's OS clipboard and reports
 `trusted: false`. Options are `format: "text" | "tsv"` and
-`requireEditableFocus: true | false`. The receipt reports byte/character counts,
-strategy, and focus before/after, but never echoes the payload.
+`requireEditableFocus: true | false`. The receipt reports byte/character
+counts, strategy, and focus before/after, but never echoes the payload. Prefer
+it over per-character typing for multiline or tabular content.
 
 ```js
 const input = page.getByRole("textbox", {name: "Data"});
@@ -63,7 +72,8 @@ events and a site may reject them.
 ## `tabbit.triggerAndWait(event, trigger, options)`
 
 Arms the waiter before running `trigger`. Supported events are `popup`, `page`,
-`download`, `dialog`, `navigation`, and `url` (`options.url` required for `url`).
+`download`, `dialog`, `navigation`, and `url` (`options.url` required for
+`url`).
 
 ```js
 const popup = await tabbit.triggerAndWait(
@@ -77,27 +87,14 @@ return {popupUrl: popup.url()};
 
 Use this for ambiguous transitions. It arms page, URL, navigation, frame, and
 DOM-revision observation before `trigger`, then returns the highest-priority
-observed result after a short settle window. Options are `timeoutMs`, `settleMs`,
-`pollMs`, and `activatePage`. With `activatePage: true`, a newly opened page
-becomes the task's active `page`.
+observed result after a short settle window. Options are `timeoutMs`,
+`settleMs`, `pollMs`, and `activatePage`. With `activatePage: true`, a newly
+opened page becomes the task's active `page`.
 
 ```js
 const result = await tabbit.triggerAndObserve(
-  () => tabbit.safeClick(target),
+  () => page.getByRole("button", {name: "Continue"}).click(),
   {timeoutMs: 3000, activatePage: true},
 );
 return {kind: result.kind, url: page.url()};
 ```
-
-## CLI conveniences
-
-Use the launcher documented by `platform-invocation.md`:
-
-- `inspect --task NAME [--frames visible] [--focus] [--depth N] [--max-chars N]`
-- `paste --task NAME [--format text|tsv] [--require-editable-focus]`
-- `nodejs --diagnostics focus` wraps a body with before/after focus diagnostics.
-- `nodejs --compact` shortens metadata only when a named task is reused.
-- `resource --max-bytes N` reads up to 65536 bytes per bounded page.
-
-All commands use the existing task runtime and receipt lane. Existing commands
-and default output remain unchanged when these flags are absent.

@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.3.0
+
+- Major upgrade: browser automation now runs through the native
+  `tabbit_browser` tool — real Playwright code executing in the user's Tabbit
+  Browser profile with shared login state, screenshots into model context,
+  automatic interruption recovery, and multi-instance resolution — plus a
+  browser-backed `web_fetch` provider, `@tab` page mentions in the dsh web
+  composer, a dedicated page-access permission, and a `/tabbit` diagnostics
+  command. The bundled skill now teaches the tool workflow instead of the
+  `tabbit-cli` shell workflow. Requires Node 22.19 or newer (was 20).
+- Adopted the renamed `tabbit-cli` launcher that current Tabbit Browser
+  builds register (with fallback to the legacy `tabbit-playwright` name), and
+  the per-instance `.product` labels in the instance registry.
+- New model-free tab inventory: `ctx.tabbit.listAllTabs()` and the loopback
+  route `GET /tabbit/tabs` list every tab of the running browser profile
+  (including the user's own tabs) by talking to the Runtime Service endpoint
+  directly — no launcher process, no task, no side effects, ~1ms steady-state.
+  Requires a 1.11.16+ Tabbit Browser; the browser is never launched for a
+  listing, offline instances report as unavailable instead.
+- The `@` mention menu in the dsh web composer now lists the user's own
+  browser tabs alongside agent task pages (active tab first; only http(s)
+  pages are offered, since chrome://, extension, and blank/new-tab pages
+  cannot deliver content when mentioned), under a "网页标签" group shown
+  below DSH's built-in file/session mentions, with up to 50 candidates
+  instead of 8. Mentioning a user tab fetches a fresh copy of that URL's
+  content through the shared browser fetch task — the user's actual tab is
+  never claimed, moved, or focused. The extracted page text no longer lands
+  in the sent message itself: the composer sends a short `@Title` mention,
+  and the full text is delivered to the model as a separate, collapsed
+  "Context injection" entry via an `agent/pre-step` hook — the same delivery
+  path DSH's own `@file`/`@session` mentions use — so a mentioned page's
+  content never floods the visible chat bubble. `tabbit_browser` gained
+  `list_tabs: true` for the model-facing version of the same inventory, paired
+  with `claim_tabs` to attach a specific user tab to a new task.
+- Windows support: the launcher is discovered under
+  `%LOCALAPPDATA%\Tabbit\LocalAgent\bin\tabbit-cli.exe`, instance selection
+  defers to the native CLI when the instance registry is not readable, and the
+  environment preflight falls back to runtime-process detection.
+- The environment preflight (`tabbit_browser_install`), the daily plugin
+  update check, and the `tabbit_plugin_update` tool carry over from 0.2.x.
+  The update check now reads the npm registry for the latest version (with
+  release notes served from the published tarball), and stays silent for
+  browser-managed (preinstalled) copies, which update together with Tabbit
+  Browser.
+- The bundled skill gained references for the runtime interaction helpers
+  (`tabbit.observe`, `pasteText`, `triggerAndObserve`, …) and AI-mode ARIA
+  snapshot recipes for canvas-backed and visually complex surfaces. It is now
+  named `tabbit`, deliberately matching the shared skill Tabbit Browser
+  installs into `~/.agents/skills/tabbit/`: DSH's same-name precedence
+  prefers that browser-managed copy, and the bundled one is the fallback for
+  machines without a current browser. The `/tabbit` diagnostics command was
+  renamed to `/tabbit-info` to leave the `/tabbit` slash entry to the skill.
+- Task finishing adapted to the new runtime semantics (plain `finish` now
+  retains tabs as a resumable group): the plugin always passes an explicit
+  `--keep` or `--discard`, which behaves correctly on both CLI generations,
+  so `finish` without `keep_tabs` and end-of-session cleanup reliably close
+  task tabs.
+- DSH `0.1.2-alpha.1` also ships its own direct-HTTP `web_fetch` provider and
+  pins the `web` service to it; the bundle patch now re-pins `fetchProvider`
+  to this plugin's browser-backed provider, keeping JS rendering, login
+  state, the page-access/intranet permission gates, and the browser's proxy
+  environment (the built-in fetcher connects directly to resolved public IPs
+  and refuses every domain on fake-ip proxy setups).
+- Requires DSH `0.1.2-alpha.1` or newer, whose standard agent preset ships
+  with `web_fetch` enabled — the bundled "Tabbit mode" preset is gone, and
+  plugin activation removes a previously installed managed copy (marker
+  protocol respected: user-owned copies are never touched).
+
 ## 0.2.3
 
 - Fixed the bundle's `cordis.patch.yml` loader entry to use the npm package

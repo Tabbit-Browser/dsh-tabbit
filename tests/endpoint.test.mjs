@@ -1,0 +1,294 @@
+// 直连 Runtime Service 端点客户端（lib/runtime/endpoint.js）与 Windows 实例
+// 注册表解析（lib/runtime/instances.js）的单元测试。
+//
+// 假服务器逐条镜像真服务端（runtime-public-server.mjs）我们依赖的行为：
+//   - 首帧必须是【严格恰好三键】的 {version:1,token,generation}；
+//   - 认证失败【无响应直接断开】（客户端把它识别为凭据过期）；
+//   - 认证成功无回执，后续每帧一响应 {ok,value|error}。
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { createServer } from 'node:net'
+import { writeFileSync } from 'node:fs'
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { listAllTabs, pingEndpoint, readEndpoint } from '../lib/runtime/endpoint.js'
+import { listInstancesWindows } from '../lib/runtime/instances.js'
+
+const TOKEN = 'test-token-4Vf8jKxq2ZpN7RmW1cSdYbHgAeLuTiOo0'
+const GENERATION = 'ABCDEF0123456789ABCDEF0123456789'
+
+let socketCounter = 0
+// unix socket 路径有 ~104 字节的系统上限，用短名直接放 tmpdir 根（不进 mkdtemp 子目录）。
+function socketPath() {
+  return join(tmpdir(), `dsh-tabbit-ep-${process.pid}-${socketCounter++}.sock`)
+}
+
+/*
+ * 起一个假 Runtime Service 公开端点。behavior 决定认证后的响应方式：
+ *   respond（默认）—— 对每帧回 {ok:true,value}；
+ *   error          —— 回 {ok:false,error:{code:'SERVICE_BUSY'}}；
+ *   silent         —— 收帧不回（测客户端超时）。
+ * onBadAuth 在认证失败断开【之前】同步调用（测凭据轮换恢复时用它改写 endpoint 文件）。
+ */
+async function startFakeService({ value, behavior = 'respond', token = TOKEN, onBadAuth } = {}) {
+  const address = socketPath()
+  const connections = []
+  const server = createServer((socket) => {
+    connections.push(socket)
+    let buffer = ''
+    let authenticated = false
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8')
+      let newline
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const frame = buffer.slice(0, newline)
+        buffer = buffer.slice(newline + 1)
+        if (!authenticated) {
+          let auth
+          try { auth = JSON.parse(frame) } catch { auth = undefined }
+          const ok = auth && typeof auth === 'object' && Object.keys(auth).length === 3 &&
+            auth.version === 1 && auth.token === token && auth.generation === GENERATION
+          if (!ok) {
+            onBadAuth?.()
+            socket.destroy()
+            return
+          }
+          authenticated = true
+          continue
+        }
+        if (behavior === 'silent') continue
+        if (behavior === 'error') {
+          socket.end(`${JSON.stringify({ ok: false, error: { name: 'Error', code: 'SERVICE_BUSY', message: 'Browser Runtime Service is at its task limit' } })}\n`)
+          continue
+        }
+        socket.end(`${JSON.stringify({ ok: true, value })}\n`)
+      }
+    })
+  })
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(address, resolve)
+  })
+  return {
+    address,
+    close: async () => {
+      for (const socket of connections) socket.destroy()
+      await new Promise((resolve) => server.close(resolve))
+    },
+  }
+}
+
+function endpointJson(address, overrides = {}) {
+  return JSON.stringify({
+    version: 2,
+    kind: 'browser-runtime-service',
+    transport: 'unix_socket',
+    address,
+    token: TOKEN,
+    generation: GENERATION,
+    browserPid: 4242,
+    ...overrides,
+  })
+}
+
+async function withEndpointFile(content, run) {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tabbit-endpoint-'))
+  const path = join(dir, 'endpoint.json')
+  try {
+    if (content !== undefined) await writeFile(path, content)
+    await run(path)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+const TABS_FIXTURE = {
+  truncated: false,
+  tabs: [
+    { tabId: 11, windowId: 1, index: 0, title: '首页', url: 'https://example.com/', active: true, state: 'available', group: null },
+    { tabId: 12, windowId: 1, index: 1, title: '组内页', url: 'https://example.com/b', active: false, state: 'busy', group: { groupId: 'A1B2', title: '调研' } },
+  ],
+}
+
+test('listAllTabs performs auth + request over one connection and validates the shape', async () => {
+  const service = await startFakeService({ value: TABS_FIXTURE })
+  try {
+    await withEndpointFile(endpointJson(service.address), async (path) => {
+      const inventory = await listAllTabs(path)
+      assert.deepEqual(inventory, TABS_FIXTURE)
+    })
+  } finally {
+    await service.close()
+  }
+})
+
+test('listAllTabs drops malformed entries and normalizes unknown states', async () => {
+  const service = await startFakeService({
+    value: {
+      truncated: true,
+      tabs: [
+        { tabId: 21, url: 'https://ok.example/', state: 'weird', group: { title: '缺 groupId' } },
+        { url: 'https://no-tab-id.example/' },
+        'not-an-object',
+      ],
+    },
+  })
+  try {
+    await withEndpointFile(endpointJson(service.address), async (path) => {
+      const inventory = await listAllTabs(path)
+      assert.equal(inventory.truncated, true)
+      assert.equal(inventory.tabs.length, 1)
+      assert.equal(inventory.tabs[0].tabId, 21)
+      assert.equal(inventory.tabs[0].state, 'available')
+      assert.equal(inventory.tabs[0].group, null)
+    })
+  } finally {
+    await service.close()
+  }
+})
+
+test('pingEndpoint returns running + generation', async () => {
+  const service = await startFakeService({ value: { running: true, generation: GENERATION } })
+  try {
+    await withEndpointFile(endpointJson(service.address), async (path) => {
+      assert.deepEqual(await pingEndpoint(path), { running: true, generation: GENERATION })
+    })
+  } finally {
+    await service.close()
+  }
+})
+
+test('server error frames become classified TabbitCliError values', async () => {
+  const service = await startFakeService({ behavior: 'error' })
+  try {
+    await withEndpointFile(endpointJson(service.address), async (path) => {
+      await assert.rejects(listAllTabs(path), (error) => {
+        assert.equal(error.name, 'TabbitCliError')
+        assert.equal(error.code, 'SERVICE_BUSY')
+        assert.equal(error.kind, 'busy')
+        return true
+      })
+    })
+  } finally {
+    await service.close()
+  }
+})
+
+test('stale credentials recover by re-reading a rotated endpoint file', async () => {
+  // 服务端只认新 token；endpoint 文件先写旧 token。首次连接在认证阶段被无响应
+  // 断开，断开前（onBadAuth）文件被"浏览器"轮换成新 token——客户端的单次重试
+  // 现读文件即成功。这正是真实浏览器重启窗口的时序。
+  let rotatedPath
+  const service = await startFakeService({
+    value: TABS_FIXTURE,
+    onBadAuth: () => {
+      writeFileSync(rotatedPath, endpointJson(service.address))
+    },
+  })
+  try {
+    await withEndpointFile(endpointJson(service.address, { token: 'stale-old-token' }), async (path) => {
+      rotatedPath = path
+      const inventory = await listAllTabs(path)
+      assert.deepEqual(inventory, TABS_FIXTURE)
+    })
+  } finally {
+    await service.close()
+  }
+})
+
+test('a consistently refused connection surfaces as browser-unavailable', async () => {
+  const service = await startFakeService({ value: TABS_FIXTURE, token: 'other-token' })
+  try {
+    await withEndpointFile(endpointJson(service.address), async (path) => {
+      await assert.rejects(listAllTabs(path), (error) => {
+        assert.equal(error.code, 'STALE_ENDPOINT')
+        assert.equal(error.kind, 'browser-unavailable')
+        return true
+      })
+    })
+  } finally {
+    await service.close()
+  }
+})
+
+test('missing endpoint file means the browser is offline', async () => {
+  await withEndpointFile(undefined, async (path) => {
+    await assert.rejects(listAllTabs(path), (error) => {
+      assert.equal(error.code, 'ENDPOINT_MISSING')
+      assert.equal(error.kind, 'browser-unavailable')
+      return true
+    })
+  })
+})
+
+test('unsupported endpoint schema fails loudly instead of guessing', async () => {
+  await withEndpointFile(endpointJson('/tmp/unused.sock', { version: 3 }), async (path) => {
+    assert.throws(() => readEndpoint(path), (error) => {
+      assert.equal(error.code, 'ENDPOINT_UNSUPPORTED')
+      assert.equal(error.kind, 'protocol')
+      return true
+    })
+  })
+})
+
+test('a silent service hits the client timeout', async () => {
+  const service = await startFakeService({ behavior: 'silent' })
+  try {
+    await withEndpointFile(endpointJson(service.address), async (path) => {
+      await assert.rejects(listAllTabs(path, { timeoutMs: 200 }), (error) => {
+        assert.equal(error.code, 'CLIENT_TIMEOUT')
+        assert.equal(error.kind, 'timeout')
+        return true
+      })
+    })
+  } finally {
+    await service.close()
+  }
+})
+
+test('listInstancesWindows parses records and mirrors the C++ validation rules', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tabbit-win-registry-'))
+  try {
+    const cliPath = join(dir, 'tabbit-cli.exe')
+    await writeFile(cliPath, 'stub')
+    const onlineEndpoint = join(dir, 'endpoint-online.json')
+    await writeFile(onlineEndpoint, '{}')
+    const record = (overrides = {}) => JSON.stringify({
+      version: 1,
+      instanceId: 'AAAA0000BBBB1111',
+      product: 'Tabbit Browser',
+      cliPath,
+      endpointPath: onlineEndpoint,
+      browserPath: 'C:/apps/tabbit.exe',
+      userDataDir: 'C:/users/x/AppData/Local/Tabbit Browser/User Data',
+      ...overrides,
+    })
+    await writeFile(join(dir, 'AAAA0000BBBB1111.json'), record())
+    await writeFile(
+      join(dir, 'CCCC2222DDDD3333.json'),
+      record({ instanceId: 'CCCC2222DDDD3333', product: '', endpointPath: join(dir, 'endpoint-absent.json') }),
+    )
+    // 下面四条都必须被整个跳过：schema 版本不认识 / 文件名与记录身份不一致 /
+    // id 形状不合法 / cliPath 指向不存在的文件。
+    await writeFile(join(dir, 'EEEE4444FFFF5555.json'), record({ instanceId: 'EEEE4444FFFF5555', version: 2 }))
+    await writeFile(join(dir, 'MISMATCH00000000.json'), record())
+    await writeFile(join(dir, 'lowercase-id.json'), record({ instanceId: 'lowercase-id' }))
+    await writeFile(
+      join(dir, '9999AAAA8888BBBB.json'),
+      record({ instanceId: '9999AAAA8888BBBB', cliPath: join(dir, 'missing-cli.exe') }),
+    )
+    await mkdir(join(dir, 'not-a-record.json')) // 目录同名文件：读文件抛错也要被跳过
+
+    const instances = listInstancesWindows(dir)
+    assert.deepEqual(instances.map((instance) => instance.id), ['AAAA0000BBBB1111', 'CCCC2222DDDD3333'])
+    assert.equal(instances[0].online, true)
+    assert.equal(instances[0].appName, 'Tabbit Browser')
+    assert.equal(instances[1].online, false)
+    // product 为空时回退到从 cliPath 推导的文件名。
+    assert.equal(instances[1].appName, 'tabbit-cli.exe')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

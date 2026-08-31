@@ -1,4 +1,0 @@
-interface:
-  display_name: "Tabbit Browser"
-  short_description: "Control Tabbit through Browser-owned Playwright tasks"
-  default_prompt: "Use $tabbit-browser to ensure stable Tabbit is available, then use tabbit-cli to complete this browser task in an isolated task space owned by Tabbit Browser."
