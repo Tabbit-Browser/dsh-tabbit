@@ -1,41 +1,78 @@
 {
   "name": "dsh-tabbit",
-  "version": "0.2.3",
-  "description": "DSH bundle that packages the Tabbit Browser skill and background installer",
+  "version": "0.3.0",
+  "description": "Tabbit Browser bundle for DeepSeek Harness: a code-first tabbit_browser tool, browser-backed web_fetch, @tab composer mentions, a dedicated page-access permission, an environment preflight with background installer download, and a daily plugin update check.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Tabbit-Browser/dsh-tabbit.git"
   },
   "type": "module",
-  "main": "./index.js",
+  "main": "./lib/core/index.js",
   "exports": {
-    ".": "./index.js"
+    ".": "./lib/core/index.js",
+    "./core": "./lib/core/index.js",
+    "./permissions": "./lib/permissions/index.js",
+    "./tool-browser": "./lib/tool-browser/index.js",
+    "./web-fetch": "./lib/web-fetch/index.js",
+    "./mentions": "./lib/mentions/index.js",
+    "./installer": "./lib/installer/index.js",
+    "./client": "./client/client.js",
+    "./runtime": "./lib/runtime/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
   },
   "files": [
-    "index.js",
-    "installer.js",
-    "update-check.js",
+    "lib",
+    "client",
+    "skills",
     "cordis.patch.yml",
-    "skills/**",
     "README.md",
-    "README.zh-CN.md"
+    "README.en.md",
+    "CHANGELOG.md"
   ],
-  "scripts": {
-    "test": "node --test"
-  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-input-trigger"
+      ]
     }
   },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test"
+  },
   "engines": {
-    "node": ">=20"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0",
-    "@deepseek-ai/dsh-jobs": ">=0.1.0-rc.5",
-    "@deepseek-ai/dsh-skill": ">=0.1.0-rc.5",
-    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.5"
+    "@deepseek-ai/dsh-agent": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-attachment": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-commands": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-jobs": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-llm": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-settings": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-skill": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-tools": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-user-approval": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/dsh-web": ">=0.1.1-rc.2 || >=0.1.2-alpha.1",
+    "@deepseek-ai/schemastery": ">=3.18.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-llm": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-web": "0.1.2-alpha.2",
+    "@deepseek-ai/schemastery": "link:../deepseek-harness/vendor/schemastery",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
   },
   "license": "MIT"
 }

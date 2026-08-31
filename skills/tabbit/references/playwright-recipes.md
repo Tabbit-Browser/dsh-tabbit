@@ -1,8 +1,14 @@
 # Playwright recipes
 
-Use these recipes inside a `tabbit-cli nodejs --task '<name>'` heredoc.
-Each code block is an async function body: use it
-directly without adding an async wrapper.
+Use these code bodies as the `code` field of a bound `bootstrap` or `run`
+request. Each is an async function body: use it directly without adding an
+async wrapper. For name-addressed compatibility, send the same body to
+`<launcher> nodejs --task NAME` through a POSIX heredoc on macOS/Linux or the
+Windows code-input procedure in [platform invocation](platform-invocation.md).
+
+Each frame gets a fresh async wrapper, so lexical variables do not survive.
+Re-resolve Pages with `context.pages()`/`pages()`, or put intentional
+cross-frame state on `globalThis`.
 
 ## Contents
 
@@ -37,6 +43,8 @@ return {
 ```
 
 Use `mutation: "possible"` because navigation changes browser state.
+Prefer `domcontentloaded`, or `commit` followed by an explicit readiness check.
+Reserve full `load` for tasks that depend on every page resource.
 
 ## Inspect visible controls and visual targets
 

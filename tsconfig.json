@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "lib",
+    "strict": true,
+    "declaration": false,
+    "sourceMap": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    // Type-only resolution of dsh packages against a local deepseek-harness
+    // checkout's built declarations. Runtime resolution happens inside the dsh
+    // profile (peerDependencies + the $DSH_HOME/profiles/node_modules fallback),
+    // so these paths never leak into emitted JS. Adjust DSH_CHECKOUT if your
+    // checkout lives elsewhere.
+    "paths": {
+      "@deepseek-ai/cordis": ["../../repos/deepseek-harness/vendor/cordis/lib/types/index.d.ts"],
+      "@deepseek-ai/schemastery": ["../../repos/deepseek-harness/vendor/schemastery/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-tools": ["../../repos/deepseek-harness/packages/core/tools/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-web": ["../../repos/deepseek-harness/packages/web/web/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-settings": ["../../repos/deepseek-harness/packages/settings/settings/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-skill": ["../../repos/deepseek-harness/packages/skill/skill/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-agent": ["../../repos/deepseek-harness/packages/core/agent/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-jobs": ["../../repos/deepseek-harness/packages/jobs/jobs/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-session": ["../../repos/deepseek-harness/packages/core/session/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-llm": ["../../repos/deepseek-harness/packages/llm/llm/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-attachment": ["../../repos/deepseek-harness/packages/attachment/attachment/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-commands": ["../../repos/deepseek-harness/packages/interaction/commands/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-system-prompt": ["../../repos/deepseek-harness/packages/core/system-prompt/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-host-webserver": ["../../repos/deepseek-harness/packages/host/webserver/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-user-approval": ["../../repos/deepseek-harness/packages/interaction/user-approval/lib/types/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}
