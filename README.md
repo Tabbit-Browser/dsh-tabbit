@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png?v=2)
+![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png?v=3)
 
 Tabbit Browser 的 DeepSeek Harness（dsh）插件包（bundle）。dsh 可以通过此插件调用 Tabbit 完成 Agent 任务：真实页面、真实登录态、真实交互，经原生 code-first 工具驱动（不走 shell 转发）。适用于网页自动化、信息提取、QA 与评测。
 

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.md)
 
-![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png?v=2)
+![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png?v=3)
 
 A DeepSeek Harness (dsh) plugin bundle for Tabbit Browser. Through this
 plugin, dsh calls on Tabbit to complete agent tasks: real pages, real login
