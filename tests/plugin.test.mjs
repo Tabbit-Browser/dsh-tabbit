@@ -7,7 +7,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as installer from '../lib/installer/index.js'
-import { skillProvider, apply as applyCore } from '../lib/core/index.js'
+import { skillProvider, apply as applyCore, parseSkillDocument } from '../lib/core/index.js'
 
 const SUPPORTED = {
   installations: [{ name: 'Tabbit', edition: 'international', channel: 'stable', version: '1.9.2' }],
@@ -284,4 +284,29 @@ test('serves one bundled tabbit skill from SKILL.md frontmatter', async () => {
     if (saved === undefined) delete process.env.TABBIT_PLAYWRIGHT_INSTANCE
     else process.env.TABBIT_PLAYWRIGHT_INSTANCE = saved
   }
+})
+
+/* ── parseSkillDocument：LF/CRLF frontmatter 拆分 ── */
+
+test('parseSkillDocument splits LF frontmatter into fields and body', () => {
+  const source = '---\nname: demo\ndescription: "quoted d"\n---\n\n# Demo\nbody'
+  const { fields, body } = parseSkillDocument(source)
+  assert.deepEqual(fields, { name: 'demo', description: 'quoted d' })
+  assert.equal(body, '\n# Demo\nbody')
+})
+
+test('parseSkillDocument tolerates CRLF frontmatter (Windows checkout / autocrlf)', () => {
+  // 曾经的 bug：拆分只认 \n，CRLF checkout 下 ---\r\n 永远匹配不上开头的
+  // ---\n，整份 frontmatter（含 YAML 头）原样落进 body，一起喂给了模型。
+  const source = '---\r\nname: demo\r\ndescription: "quoted d"\r\n---\r\n\r\n# Demo\r\nbody'
+  const { fields, body } = parseSkillDocument(source)
+  assert.deepEqual(fields, { name: 'demo', description: 'quoted d' })
+  assert.equal(body, '\r\n# Demo\r\nbody')
+  assert.doesNotMatch(body, /^---/)
+})
+
+test('parseSkillDocument passes through content with no or unclosed frontmatter', () => {
+  assert.deepEqual(parseSkillDocument('no frontmatter here'), { fields: {}, body: 'no frontmatter here' })
+  assert.deepEqual(parseSkillDocument('---\nnever closed'), { fields: {}, body: '---\nnever closed' })
+  assert.deepEqual(parseSkillDocument('---\r\nnever closed'), { fields: {}, body: '---\r\nnever closed' })
 })

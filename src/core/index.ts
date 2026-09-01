@@ -565,20 +565,26 @@ const SKILL_FALLBACK_DESCRIPTION =
  * （正文才是要进模型上下文的内容）。
  * 只认我们自己写的这一层【扁平 key: value】（值可带引号），认不出的行直接
  * 跳过——不为一个几行的 frontmatter 引入 YAML 依赖，也不假装能解析嵌套结构。
+ * 开合分隔符按开头是 \n 还是 \r\n 定档、全程沿用同一种换行符（含内部按行
+ * split 取字段）——容忍 Windows checkout（git autocrlf）产出的 CRLF 文件，
+ * 不强行改写正文本身的换行风格。
  */
-function parseSkillDocument(source: string): { fields: Record<string, string | undefined>; body: string } {
-  if (!source.startsWith('---\n')) return { fields: {}, body: source };
-  const end = source.indexOf('\n---\n', 4);
+export function parseSkillDocument(source: string): { fields: Record<string, string | undefined>; body: string } {
+  const newline = source.startsWith('---\r\n') ? '\r\n' : '\n';
+  const opening = `---${newline}`;
+  if (!source.startsWith(opening)) return { fields: {}, body: source };
+  const closing = `${newline}---${newline}`;
+  const end = source.indexOf(closing, opening.length);
   if (end === -1) return { fields: {}, body: source };
   const fields: Record<string, string | undefined> = {};
-  for (const line of source.slice(4, end).split('\n')) {
+  for (const line of source.slice(opening.length, end).split(newline)) {
     const match = /^([A-Za-z][\w-]*):\s*(.*)$/u.exec(line);
     if (match === null) continue;
     // 去掉整体包裹的成对引号（YAML 里 description: "..." 很常见）。
     const value = match[2].trim().replace(/^(['"])([\s\S]*)\1$/u, '$2');
     if (value !== '') fields[match[1]] = value;
   }
-  return { fields, body: source.slice(end + 5) };
+  return { fields, body: source.slice(end + closing.length) };
 }
 
 /*
