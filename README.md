@@ -41,6 +41,12 @@ dsh plugin --profile web add link:/path/to/dsh-tabbit   # 本地开发
 
 > 本包取代早期的 `tabbit-browser` skill-only 插件；npm 上的 0.2.x 版本也由本版本接续——0.2.x 用户经每日更新检查会收到升级提示，重跑安装命令即可原地升级。
 
+## 社区与交流
+
+欢迎扫描下方二维码加入 **dsh-tabbit 开发者交流群**，交流使用心得、反馈问题与探讨新特性：
+
+![dsh-tabbit 开发者交流群](dsh-tabbit开发者群聊.jpg)
+
 ## 设置
 
 ### 基本配置

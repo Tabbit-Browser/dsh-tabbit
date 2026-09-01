@@ -48,6 +48,12 @@ dsh plugin --profile web add link:/path/to/dsh-tabbit   # local development
 > upgrade notice from the daily update check, and simply re-running the
 > install command upgrades in place.
 
+## Community & Support
+
+Scan the QR code below to join the **dsh-tabbit Developer Group** to share feedback, ask questions, and discuss new features:
+
+![dsh-tabbit Developer Group](dsh-tabbit开发者群聊.jpg)
+
 ## Settings
 
 ### Basic configuration
