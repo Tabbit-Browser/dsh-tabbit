@@ -23,12 +23,15 @@
  *  - 任务【只能看到自己打开的或被显式 claim（认领）的标签页】，无法枚举
  *    用户的其它标签页——这是浏览器侧的安全边界；
  *  - 整机最多 8 个并发任务；单次求值最长 120 秒；
- *  - 本客户端用到的 CLI 动词：`nodejs`（求值）、`finish`（结束任务，
- *    keep 语义两代有别，见 finishTask 注释）、`receipt`（查回执）、
- *    `checkpoint`（检查点）、`resource`（分块读资源）、`tasks`（列任务）。
- *    新代 CLI（1.11.16+）另有 tabs/claim/resume/screenshot/inspect/paste
- *    和 persistent 持久模式（JSON 帧协议）——本客户端尚未使用，见浏览器
- *    共享 skill（~/.agents/skills/tabbit）与 TabbitDance 源码。
+ *  - 本客户端用到的 CLI 动词：`nodejs`（求值，创建时可带 --claim-tab）、
+ *    `finish`（结束任务，keep 语义两代有别，见 finishTask 注释）、
+ *    `receipt`（查回执）、`checkpoint`（检查点）、`resource`（分块读资源）、
+ *    `tasks`（列任务）、`claim`（对已存在的任务追加认领标签页，见
+ *    claimTabs()——真机 `--help` 确认过是独立顶层子命令，不是只存在于
+ *    persistent 帧协议里）。新代 CLI（1.11.16+）另有 tabs/resume/
+ *    screenshot/inspect/paste 和 persistent 持久模式（JSON 帧协议）——
+ *    本客户端尚未使用，见浏览器共享 skill（~/.agents/skills/tabbit）与
+ *    TabbitDance 源码。
  *
  * ─── 一次 evaluate 的完整旅程 ─────────────────────────────────────────
  *
@@ -481,6 +484,26 @@ export class TabbitClient {
   /* 打检查点（`checkpoint` 命令）——解除任务隔离状态的钥匙（见 evaluate 的恢复逻辑）。 */
   async checkpoint(task: string): Promise<unknown> {
     return await this.invoke(['checkpoint', '--task', task], '', CONTROL_TIMEOUT_MS);
+  }
+
+  /*
+   * 把一个或多个可用（available）标签页追加认领进一个【已经存在】的任务
+   * （`claim` 命令）。与 evaluate() 的 claimTabs 只在任务创建那一刻生效不同，
+   * 这是独立的一次性 CLI 子命令——真机 `tabbit-cli --help` 的 usage 行确认过
+   * 它是顶层动词（`claim --task <name> --tab <id>...`），不是只存在于 persistent
+   * 帧协议里；真机验证过对一个此前已创建好的任务追加 claim 可行。
+   * 批量原子：文档明确"duplicate, stale, busy, unsupported, or cross-window
+   * inputs do not partially claim"——要么全部认领成功，要么整批失败并抛错，
+   * 调用方不需要处理"部分成功"的中间态。
+   */
+  async claimTabs(task: string, tabIds: number[]): Promise<{ groupId?: string; ownedPageCount?: number }> {
+    const argv = ['claim', '--task', task];
+    for (const tab of tabIds) argv.push('--tab', String(tab));
+    const response = (await this.invoke(argv, '', CONTROL_TIMEOUT_MS)) as { groupId?: unknown; ownedPageCount?: unknown };
+    return {
+      ...(typeof response.groupId === 'string' ? { groupId: response.groupId } : {}),
+      ...(typeof response.ownedPageCount === 'number' ? { ownedPageCount: response.ownedPageCount } : {}),
+    };
   }
 
   /* 列出当前实例上的所有任务（`tasks` 命令）。返回值形状异常时兜底为空数组。 */

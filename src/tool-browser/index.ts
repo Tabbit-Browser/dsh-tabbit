@@ -65,7 +65,7 @@ const DESCRIPTION = [
   '`globalThis` persists across calls in the same task — store state instead of re-scraping. `console.*` output is discarded; communicate via the return value only.',
   'Return small JSON-serializable values. To show yourself a screenshot, save it with `page.screenshot({ path: artifactPath("x.png") })` and return `{ screenshots: [artifactPath("x.png")] }`.',
   'Pass `finish: true` on your last call once this piece of browser work is done, so the task and its tab group close instead of sitting open indefinitely; add `keep_tabs: true` alongside it if the tabs should stay open regardless (e.g. tabs the user pointed you at).',
-  "Pass `list_tabs: true` (no code needed) to list every tab currently open in the user's browser — all windows, including tabs you did not open; metadata only, zero side effects. Use it to find a tab the user referred to, then attach that tab via `claim_tabs` when creating a new task.",
+  "Pass `list_tabs: true` (no code needed) to list every tab currently open in the user's browser — all windows, including tabs you did not open; metadata only, zero side effects. Use it to find a tab the user referred to, then attach that tab via `claim_tabs` (works whether the task is new or already exists).",
   'Pass `list_tasks: true` (no code needed) to list the browser tasks this session already has open — a memory jog for when you have lost track after a gap in the conversation, before deciding whether to reuse one or start fresh.',
   'Call `tabbit_browser_install` once before your first browser call in a session, and load the `tabbit` skill for recipes before non-trivial work.',
 ].join(' ');
@@ -113,6 +113,14 @@ interface BrowserToolValue {
   finished?: true;
   /* finish 失败时的原因（不让整个调用失败，只如实报告）。 */
   finishError?: string;
+  /* claim_tabs 命中"任务已存在"分支、走独立 claim 子命令成功时：本次请求
+   * 认领的标签页数（claim 批量原子，成功即等于 claim_tabs.length）与该任务
+   * 认领后拥有的标签页总数。 */
+  claimedTabCount?: number;
+  ownedPageCount?: number;
+  /* 独立 claim 失败时的原因（同 finishError：不让整个调用失败，只如实报告；
+   * 求值本身该跑还是照跑）。 */
+  claimError?: string;
   screenshots?: ScreenshotRecord[];
   [key: string]: unknown;
 }
@@ -183,16 +191,19 @@ export function apply(ctx: Context): void {
           type: 'integer',
           description: 'Per-call evaluation timeout in milliseconds, max 120000 (default 120000).',
         },
-        // claim_tabs：把用户【明确指给模型】的已有标签页认领进任务。
-        // Runtime Service 的规则是"只在任务创建那一刻生效"，复用任务时它把
-        // claim【静默忽略】——静默成功最坑，所以 client.ts 的 evaluateOnce 看到
-        // 回执里 reused=true 就自己抛 CLAIM_REQUIRES_NEW_TASK（报错的是我们，
-        // 不是服务端），让模型知道要换个新任务名。
+        // claim_tabs：把用户【明确指给模型】的已有标签页认领进任务。两条路径：
+        //  - 任务是本次调用【新建】的：走 evaluate() 自带的 --claim-tab（创建时
+        //    生效）；
+        //  - 任务【已经存在】（本会话此前用过，见 sessionTasks 判定）：改走
+        //    独立的 claim 一次性子命令（client.ts 的 claimTabs()）——真机
+        //    确认过这是顶层命令，不是只在任务创建那一刻才生效。
+        // 模型不需要关心走的是哪条路径，两边结果都会体现在返回值里
+        // （claimedTabCount/ownedPageCount 或 claimError）。
         claim_tabs: {
           type: 'array',
           items: { type: 'integer' },
           description:
-            'Tab ids EXPLICITLY provided by the user to attach their existing tabs to this task. Only honored when the task is first created.',
+            'Tab ids EXPLICITLY provided by the user to attach their existing tabs to this task — works whether this call creates the task or the task already exists.',
         },
         // finish：本次调用后关闭任务（从任务列表消失；除非 keep_tabs，标签组
         // 也一起关）。让模型按任务性质自己判断：一次性查询干完就关；用户可能
@@ -295,6 +306,29 @@ export function apply(ctx: Context): void {
         const task = args.task !== undefined && args.task !== '' ? args.task : tabbit.defaultTaskFor(agentId, args.label);
 
         const client = tabbit.client();
+        const requestedClaims = args.claim_tabs !== undefined && args.claim_tabs.length > 0 ? args.claim_tabs : undefined;
+        // 本会话登记表里已经有这个任务名 → 一定是复用，创建时的 --claim-tab
+        // 语义上不会生效（evaluate 会撞见 reused=true 直接抛错）。改走独立的
+        // claim 子命令，成功/失败都不让整个调用失败，只把结果软性附加到
+        // 最终返回值——求值本身该跑还是照跑（模型可能只是顺手多认领一个
+        // 标签页，不代表这次调用的主要目的就是认领）。
+        let claimOutcome: Pick<BrowserToolValue, 'claimedTabCount' | 'ownedPageCount' | 'claimError'> = {};
+        let claimAtCreation = requestedClaims;
+        if (requestedClaims !== undefined && tabbit.sessionTasks(agentId).includes(task)) {
+          claimAtCreation = undefined; // 已经在这里处理了，别再让 evaluate 撞 CLAIM_REQUIRES_NEW_TASK
+          try {
+            const claimed = await client.claimTabs(task, requestedClaims);
+            claimOutcome = {
+              claimedTabCount: requestedClaims.length,
+              ...(claimed.ownedPageCount !== undefined ? { ownedPageCount: claimed.ownedPageCount } : {}),
+            };
+          } catch (error) {
+            claimOutcome = {
+              claimError: error instanceof TabbitCliError ? friendlyCliError(error) : String((error as Error)?.message ?? error),
+            };
+          }
+        }
+
         let outcome;
         try {
           outcome = await client.evaluate({
@@ -302,7 +336,7 @@ export function apply(ctx: Context): void {
             code: args.code,
             ...(args.read_only === true ? { readOnly: true } : {}),
             ...(args.timeout_ms !== undefined ? { timeoutMs: args.timeout_ms } : {}),
-            ...(args.claim_tabs !== undefined && args.claim_tabs.length > 0 ? { claimTabs: args.claim_tabs } : {}),
+            ...(claimAtCreation !== undefined ? { claimTabs: claimAtCreation } : {}),
             signal: exec.signal, // 用户取消 → 一路传到 CLI 子进程被杀
           });
         } catch (error) {
@@ -349,6 +383,7 @@ export function apply(ctx: Context): void {
             error: outcome.errorMessage ?? 'evaluation failed',
             ...(outcome.taskWasReset ? { taskWasReset: true } : {}),
             ...(outcome.notes.length > 0 ? { notes: outcome.notes } : {}),
+            ...claimOutcome,
             ...finishOutcome,
           } satisfies BrowserToolValue as unknown as JsonValue;
         }
@@ -363,6 +398,7 @@ export function apply(ctx: Context): void {
           task,
           ...(outcome.taskWasReset ? { taskWasReset: true } : {}),
           ...(outcome.notes.length > 0 ? { notes: outcome.notes } : {}),
+          ...claimOutcome,
           ...finishOutcome,
         };
         if (decoded === undefined) {

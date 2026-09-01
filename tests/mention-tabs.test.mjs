@@ -447,3 +447,106 @@ test('tabbit_browser list_tabs takes precedence when both list_tabs and list_tas
   assert.equal(value.tabCount, 0)
   assert.equal(value.tasks, undefined)
 })
+
+/* ── tabbit_browser 工具：claim_tabs 对已存在的任务走独立 claim 子命令 ── */
+
+test('tabbit_browser claim_tabs on a task already in this session claims via the standalone command, not creation-time', async () => {
+  const claimCalls = []
+  const evaluateCalls = []
+  const tool = toolCtx({
+    sessionTasks: () => ['existing-task'],
+    rememberSessionTask: () => {},
+    client: () => ({
+      claimTabs: async (task, tabIds) => {
+        claimCalls.push({ task, tabIds })
+        return { groupId: 'G1', ownedPageCount: 3 }
+      },
+      evaluate: async (request) => {
+        evaluateCalls.push(request)
+        return {
+          status: 'succeeded',
+          result: { value: 'ok' },
+          task: { taskId: 't1', taskName: 'existing-task', reused: true },
+          taskWasReset: false,
+          notes: [],
+        }
+      },
+      resolvedInstanceId: () => 'INSTANCE1',
+    }),
+  })
+  const value = await tool.execute(
+    { task: 'existing-task', code: 'return 1;', claim_tabs: [17, 18] },
+    { agent: { id: 's1' } },
+  )
+  assert.equal(value.status, 'succeeded')
+  assert.equal(value.claimedTabCount, 2)
+  assert.equal(value.ownedPageCount, 3)
+  assert.equal(claimCalls.length, 1)
+  assert.deepEqual(claimCalls[0], { task: 'existing-task', tabIds: [17, 18] })
+  // evaluate 不该再收到 claim_tabs——已经走独立命令处理过了，重复带上只会
+  // 在服务端撞见 reused=true 触发 CLAIM_REQUIRES_NEW_TASK。
+  assert.equal(evaluateCalls.length, 1)
+  assert.equal(evaluateCalls[0].claimTabs, undefined)
+})
+
+test('tabbit_browser claim_tabs failure on an existing task is a soft error; evaluation still runs', async () => {
+  const tool = toolCtx({
+    sessionTasks: () => ['existing-task'],
+    rememberSessionTask: () => {},
+    client: () => ({
+      claimTabs: async () => {
+        throw new TabbitCliError({ kind: 'tab-claim', code: 'TAB_OWNERSHIP_CONFLICT', message: 'tab 17 is owned by another task' })
+      },
+      evaluate: async () => ({
+        status: 'succeeded',
+        result: { value: 'ok' },
+        task: { taskId: 't1', taskName: 'existing-task', reused: true },
+        taskWasReset: false,
+        notes: [],
+      }),
+      resolvedInstanceId: () => 'INSTANCE1',
+    }),
+  })
+  const value = await tool.execute(
+    { task: 'existing-task', code: 'return 1;', claim_tabs: [17] },
+    { agent: { id: 's1' } },
+  )
+  assert.equal(value.status, 'succeeded')
+  assert.equal(value.value, 'ok')
+  assert.equal(value.claimError, 'tab 17 is owned by another task')
+  assert.equal(value.claimedTabCount, undefined)
+})
+
+test('tabbit_browser claim_tabs on a brand-new task keeps the existing creation-time path unchanged', async () => {
+  const claimCalls = []
+  const evaluateCalls = []
+  const tool = toolCtx({
+    sessionTasks: () => [], // 会话里从没见过这个任务名 → 走老的创建时 --claim-tab 路径
+    rememberSessionTask: () => {},
+    client: () => ({
+      claimTabs: async (task, tabIds) => {
+        claimCalls.push({ task, tabIds })
+        return {}
+      },
+      evaluate: async (request) => {
+        evaluateCalls.push(request)
+        return {
+          status: 'succeeded',
+          result: { value: 'ok' },
+          task: { taskId: 't1', taskName: 'fresh-task', reused: false, claimedTabCount: 1 },
+          taskWasReset: false,
+          notes: [],
+        }
+      },
+      resolvedInstanceId: () => 'INSTANCE1',
+    }),
+  })
+  const value = await tool.execute({ task: 'fresh-task', code: 'return 1;', claim_tabs: [17] }, { agent: { id: 's1' } })
+  assert.equal(value.status, 'succeeded')
+  // 独立 claim 子命令完全没被调用——创建时 claim 才是正确路径。
+  assert.equal(claimCalls.length, 0)
+  assert.equal(evaluateCalls.length, 1)
+  assert.deepEqual(evaluateCalls[0].claimTabs, [17])
+  assert.equal(value.claimedTabCount, undefined)
+  assert.equal(value.claimError, undefined)
+})
