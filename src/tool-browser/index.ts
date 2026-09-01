@@ -66,6 +66,7 @@ const DESCRIPTION = [
   'Return small JSON-serializable values. To show yourself a screenshot, save it with `page.screenshot({ path: artifactPath("x.png") })` and return `{ screenshots: [artifactPath("x.png")] }`.',
   'Pass `finish: true` on your last call once this piece of browser work is done, so the task and its tab group close instead of sitting open indefinitely; add `keep_tabs: true` alongside it if the tabs should stay open regardless (e.g. tabs the user pointed you at).',
   "Pass `list_tabs: true` (no code needed) to list every tab currently open in the user's browser — all windows, including tabs you did not open; metadata only, zero side effects. Use it to find a tab the user referred to, then attach that tab via `claim_tabs` when creating a new task.",
+  'Pass `list_tasks: true` (no code needed) to list the browser tasks this session already has open — a memory jog for when you have lost track after a gap in the conversation, before deciding whether to reuse one or start fresh.',
   'Call `tabbit_browser_install` once before your first browser call in a session, and load the `tabbit` skill for recipes before non-trivial work.',
 ].join(' ');
 
@@ -139,7 +140,7 @@ export function apply(ctx: Context): void {
         list_tabs: {
           type: 'boolean',
           description:
-            "List every tab of the user's running browser instead of running code: returns { tabCount, tabs: [{ tabId, windowId, index, title, url, active, state, group? }], ... }. state 'available' means the tab can be attached via claim_tabs (new task only); 'busy' means another automation task owns it. tabCount is always the full total; at most 100 entries are returned (listTruncated: true when clipped) — narrow with tabs_filter instead of re-listing. Zero side effects; the browser is never launched for a listing. When set, code/task/finish are ignored.",
+            "List every tab of the user's running browser instead of running code: returns { tabCount, tabs: [{ tabId, windowId, index, title, url, active, state, group? }], ... }. state 'available' means the tab can be attached via claim_tabs (new task only); 'busy' means another automation task owns it. tabCount is always the full total; at most 100 entries are returned (listTruncated: true when clipped) — narrow with tabs_filter instead of re-listing. Zero side effects; the browser is never launched for a listing. Takes precedence over list_tasks if both are set. When set, code/task/finish are ignored.",
         },
         // tabs_filter：大浏览器（真机 170+ 标签页）上全量清单会顶到渲染截断线，
         // 模型必须能按关键词收窄而不是反复重列。
@@ -147,6 +148,15 @@ export function apply(ctx: Context): void {
           type: 'string',
           description:
             'With list_tabs: case-insensitive substring matched against tab title and url, to find a specific tab in a large browser (e.g. the site name the user mentioned).',
+        },
+        // list_tasks：查这个会话自己已经开过哪些任务——纯内存读取会话任务
+        // 登记表（sessionTaskRegistry/defaultTaskNames），不碰 CLI 也不碰
+        // 浏览器。模型隔了几轮容易忘记自己还有任务开着，给它一个零成本的
+        // 记忆点，别每次都靠猜测复用任务名或者重开一个。
+        list_tasks: {
+          type: 'boolean',
+          description:
+            "List the browser tasks this session currently has open, without touching the browser: returns { taskCount, defaultTask?, tasks: [{ task, isDefault }] }. defaultTask is the task an omitted `task` argument would target next. Use this when you've lost track of what you left open earlier in the conversation. Ignored if list_tabs is also set. When set, code/task/finish are ignored.",
         },
         // task：显式指定任务名（不同名字 = 完全独立的浏览器状态）。
         // 一般不传，用会话默认任务即可。
@@ -211,6 +221,9 @@ export function apply(ctx: Context): void {
       timeoutMs: 160_000,
       async execute(args, exec): Promise<JsonValue> {
         const tabbit = ctx.tabbit;
+        // 极端情况下工具可能无所属 agent（如某些编排形态），用 'shared' 兜底。
+        // list_tasks 分支也要用它，故提到最前面统一算一次。
+        const agentId = exec.agent !== undefined ? String(exec.agent.id) : 'shared';
 
         // list_tabs 分支：直连清单，与求值路径完全无关（不碰任务/agent/CLI）。
         if (args.list_tabs === true) {
@@ -256,17 +269,28 @@ export function apply(ctx: Context): void {
             throw error;
           }
         }
+        // list_tasks 分支：会话任务登记表快照，纯内存读取（sessionTasks/
+        // currentDefaultTask 都不做 I/O），比 list_tabs 还更轻——连 Runtime
+        // Service 的被动端点都不连。
+        if (args.list_tasks === true) {
+          const tasks = tabbit.sessionTasks(agentId);
+          const defaultTask = tabbit.currentDefaultTask(agentId);
+          return {
+            status: 'succeeded',
+            taskCount: tasks.length,
+            ...(defaultTask !== undefined ? { defaultTask } : {}),
+            tasks: tasks.map((task) => ({ task, isDefault: task === defaultTask })),
+          } satisfies BrowserToolValue as unknown as JsonValue;
+        }
         // 常规求值必须有代码（schema 层已放开 required，这里补明确报错）。
         if (args.code === undefined || args.code === '') {
           return {
             status: 'failed',
-            error: 'code is required unless list_tabs is true',
+            error: 'code is required unless list_tabs or list_tasks is true',
             errorCode: 'MISSING_CODE',
           } satisfies BrowserToolValue as unknown as JsonValue;
         }
 
-        // 极端情况下工具可能无所属 agent（如某些编排形态），用 'shared' 兜底。
-        const agentId = exec.agent !== undefined ? String(exec.agent.id) : 'shared';
         // 任务名决策：显式 task 优先，否则取会话默认任务（首调可被 label 定名）。
         const task = args.task !== undefined && args.task !== '' ? args.task : tabbit.defaultTaskFor(agentId, args.label);
 

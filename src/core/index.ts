@@ -330,6 +330,15 @@ export class TabbitService {
     return name;
   }
 
+  /*
+   * 只读查询当前已定型的默认任务名——不存在就返回 undefined，绝不像
+   * defaultTaskFor 那样顺手创建并定型一个新名字（给 list_tasks 之类的查询
+   * 路径用：查询本身不该有"顺带开一个任务"的副作用）。
+   */
+  currentDefaultTask(agentId: string): string | undefined {
+    return this.defaultTaskNames.get(agentId);
+  }
+
   /* 登记共享 fetch 任务在某实例上被用过（供 releaseAll 精准清理）。 */
   markFetchTaskUsed(instanceId: string | undefined): void {
     this.fetchTaskInstances.add(instanceId);

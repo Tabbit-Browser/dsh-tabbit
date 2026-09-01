@@ -1,5 +1,5 @@
 // @ 提及候选合并（roster：任务页 + 用户标签页）、用户标签页提取分支、
-// tabbit_browser 工具 list_tabs 分支的单元测试。
+// tabbit_browser 工具 list_tabs/list_tasks 分支的单元测试。
 // 路由处理器用假 req/res + 假 ctx 驱动；工具用 plugin.test.mjs 同款 mock ctx。
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -393,4 +393,57 @@ test('tabbit_browser without code and without list_tabs fails with a clear error
   const value = await tool.execute({}, { agent: { id: 'session-xyz' } })
   assert.equal(value.status, 'failed')
   assert.equal(value.errorCode, 'MISSING_CODE')
+})
+
+/* ── tabbit_browser 工具的 list_tasks 分支 ── */
+
+test("tabbit_browser list_tasks reports this session's open tasks and its default", async () => {
+  // 故意不给 client/listAllTabs：分支若不慎落到求值或 list_tabs 路径会直接
+  // 抛"不是函数"，这就是对"零副作用"契约最直接的回归检查。
+  const tool = toolCtx({
+    sessionTasks: () => ['research-dsh-ab12', 'scratch-dsh-ab12'],
+    currentDefaultTask: () => 'research-dsh-ab12',
+  })
+  const value = await tool.execute({ list_tasks: true }, { agent: { id: 'session-ab12' } })
+  assert.equal(value.status, 'succeeded')
+  assert.equal(value.taskCount, 2)
+  assert.equal(value.defaultTask, 'research-dsh-ab12')
+  assert.deepEqual(value.tasks, [
+    { task: 'research-dsh-ab12', isDefault: true },
+    { task: 'scratch-dsh-ab12', isDefault: false },
+  ])
+})
+
+test('tabbit_browser list_tasks reports an empty session with no default task', async () => {
+  const tool = toolCtx({ sessionTasks: () => [], currentDefaultTask: () => undefined })
+  const value = await tool.execute({ list_tasks: true }, { agent: { id: 'session-ab12' } })
+  assert.equal(value.status, 'succeeded')
+  assert.equal(value.taskCount, 0)
+  assert.equal(value.defaultTask, undefined)
+  assert.deepEqual(value.tasks, [])
+})
+
+test('tabbit_browser list_tasks ignores code/task/finish', async () => {
+  const tool = toolCtx({
+    sessionTasks: () => ['solo-dsh-ab12'],
+    currentDefaultTask: () => 'solo-dsh-ab12',
+  })
+  const value = await tool.execute(
+    { list_tasks: true, code: 'return 1', task: 'other', finish: true },
+    { agent: { id: 'session-ab12' } },
+  )
+  assert.equal(value.status, 'succeeded')
+  assert.equal(value.taskCount, 1)
+})
+
+test('tabbit_browser list_tabs takes precedence when both list_tabs and list_tasks are set', async () => {
+  const tool = toolCtx({
+    listAllTabs: async () => ({ truncated: false, tabs: [] }),
+    // 不给 sessionTasks/currentDefaultTask：list_tasks 分支若被误触会直接
+    // 抛"不是函数"，证明 list_tabs 分支确实先一步返回。
+  })
+  const value = await tool.execute({ list_tabs: true, list_tasks: true }, { agent: { id: 'session-ab12' } })
+  assert.equal(value.status, 'succeeded')
+  assert.equal(value.tabCount, 0)
+  assert.equal(value.tasks, undefined)
 })
