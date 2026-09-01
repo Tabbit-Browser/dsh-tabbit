@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1
+
+- Fixed the web client plugin never activating on current DSH hosts — the web
+  UI showed `dsh-tabbit: pending (waiting for service: conversationEvents)`.
+  The DSH client runtime refactor (already part of `0.1.2-alpha.1`) renamed the
+  `conversationEvents` service to `uiConversation` and moved node registration
+  from `service.register()` to `service.events.register()`. The client plugin
+  now injects `uiConversation`; the `/tabbit-info` status card, the `@tab`
+  composer source, and the watching-instance hint all had been blocked behind
+  that pending inject and work again. The `conversation.chat.node` keyed slot
+  registration and the Definition contract (`match`/`start`/`update`/
+  `buildViewNode`) are unchanged.
+
 ## 0.3.0
 
 - Major upgrade: browser automation now runs through the native
