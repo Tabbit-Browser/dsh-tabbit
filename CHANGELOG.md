@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.2
+
+- `tabbit_browser` gains `list_tasks: true`: a zero-side-effect readback of
+  the browser tasks this session already has open (which one an omitted
+  `task` would target next), read from the in-memory session registry only.
+  A memory jog for when the model has lost track after a gap in the
+  conversation, instead of guessing a task name or opening a redundant one.
+- `claim_tabs` now works when the task already exists, not only when the
+  same call creates it. Runtime Service silently drops a creation-time
+  `--claim-tab` on a reused task, so previously the plugin threw
+  `CLAIM_REQUIRES_NEW_TASK` and forced starting a fresh task just to attach
+  a tab the user pointed at mid-conversation. It now falls back to the
+  standalone `claim` CLI command for tasks the session already knows about,
+  so an already-open tab can join ongoing browser state instead of always
+  starting over.
+- Fixed the bundled `SKILL.md`'s frontmatter parser assuming LF-only line
+  endings: a copy checked out or published with CRLF endings would have had
+  its raw YAML header served to the model as skill content instead of being
+  stripped.
+
 ## 0.3.1
 
 - Fixed the web client plugin never activating on current DSH hosts — the web

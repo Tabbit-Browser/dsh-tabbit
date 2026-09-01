@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png?v=3)
+![Tabbit Browser for DeepSeek Harness](assets/dsh-tabbit-banner.png)
 
 Tabbit Browser 的 DeepSeek Harness（dsh）插件包（bundle）。dsh 可以通过此插件调用 Tabbit 完成 Agent 任务：真实页面、真实登录态、真实交互，经原生 code-first 工具驱动（不走 shell 转发）。适用于网页自动化、信息提取、QA 与评测。
 
@@ -45,7 +45,7 @@ dsh plugin --profile web add link:/path/to/dsh-tabbit   # 本地开发
 
 欢迎扫描下方二维码加入 **dsh-tabbit 开发者交流群**，交流使用心得、反馈问题与探讨新特性：
 
-![dsh-tabbit 开发者交流群](dsh-tabbit开发者群聊.jpg)
+![dsh-tabbit 开发者交流群](assets/dsh-tabbit-developer-community-qr.png.jpg)
 
 ## 设置
 
@@ -80,6 +80,21 @@ Full access 说明：dsh 的 `danger-full-access` 权限预设会给会话写入
 
 ## 开发
 
+项目的开发和测试依赖本地的 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 环境。
+由于 `@deepseek-ai/*` 系列包在 npm 上的发布版本普遍滞后，不能直接作为依赖安装，因此需要先在本地构建好一份 harness 检出，再通过下方脚本将仓库内的 .dsh-harness 符号链接指向它（该路径已在 .gitignore 中忽略）。
+整个流程只需配置这一处，`tsconfig.json` 和 `package.json` 均无需改动。
+
+Deepseek Harness 代码获取及安装（如果已安装请忽略）
+```bash
+git clone https://github.com/deepseek-ai/deepseek-harness && cd deepseek-harness && pnpm install && pnpm build && cd ..
+```
+
+将本机的 Deepseek 环境路径修改并 ln 到本项目，将 `/path/to/deepseek-harness` 改为你的实际目录。
+```bash
+npm run link-harness -- /path/to/deepseek-harness   # 或设置环境变量 DSH_HARNESS_PATH
+```
+
+安装和编译
 ```bash
 pnpm install && pnpm build   # tsc → lib/
 npm test                     # 构建 + node --test tests/
@@ -88,6 +103,5 @@ npm test                     # 构建 + node --test tests/
 ## 已知限制 / 路线图
 
 - 收藏夹/书签的提及暂不支持。
-- `claim_tabs` 端到端暂不可用。
 - 截图进上下文要求当前模型路由支持图像输入。
 - Windows 版本回归测试有限。

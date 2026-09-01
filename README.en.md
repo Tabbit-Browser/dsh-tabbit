@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.md)
 
-![Tabbit Browser for DeepSeek Harness](tabbit-for-dsh.png?v=3)
+![Tabbit Browser for DeepSeek Harness](assets/dsh-tabbit-banner.png)
 
 A DeepSeek Harness (dsh) plugin bundle for Tabbit Browser. Through this
 plugin, dsh calls on Tabbit to complete agent tasks: real pages, real login
@@ -52,7 +52,7 @@ dsh plugin --profile web add link:/path/to/dsh-tabbit   # local development
 
 Scan the QR code below to join the **dsh-tabbit Developer Group** to share feedback, ask questions, and discuss new features:
 
-![dsh-tabbit Developer Group](dsh-tabbit开发者群聊.jpg)
+![dsh-tabbit Developer Group](assets/dsh-tabbit-developer-community-qr.png.jpg)
 
 ## Settings
 
@@ -109,6 +109,26 @@ gets denied — that combination gets a denial message pointing at the
 
 ## Development
 
+Developing and testing this project depends on a local
+[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) checkout.
+The `@deepseek-ai/*` packages published on npm generally lag too far behind
+to install directly as dependencies, so you need to build a harness checkout
+locally first, then point the repo's `.dsh-harness` symlink at it with the
+script below (that path is already ignored in `.gitignore`). That's the only
+place you configure it — neither `tsconfig.json` nor `package.json` needs
+any changes.
+
+Get and build deepseek-harness (skip if you already have one):
+```bash
+git clone https://github.com/deepseek-ai/deepseek-harness && cd deepseek-harness && pnpm install && pnpm build && cd ..
+```
+
+Point this repo at it — replace `/path/to/deepseek-harness` with your actual checkout path:
+```bash
+npm run link-harness -- /path/to/deepseek-harness   # or set DSH_HARNESS_PATH
+```
+
+Install and build:
 ```bash
 pnpm install && pnpm build   # tsc → lib/
 npm test                     # build + node --test tests/
@@ -117,6 +137,5 @@ npm test                     # build + node --test tests/
 ## Known limitations / Roadmap
 
 - Mentioning bookmarks/favorites isn't supported yet.
-- `claim_tabs` isn't usable end-to-end.
 - Screenshots entering context require a model route that accepts image input.
 - Windows regression testing is limited.

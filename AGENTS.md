@@ -16,9 +16,15 @@ repo:`Tabbit-Browser/dsh-tabbit`.
   `paths` pointing at a local deepseek-harness checkout; runtime resolution is
   peerDependencies via the DSH profile's flat `node_modules` fallback.
   peerDependencies state the HOST DSH floor (currently `0.1.2-alpha.1`, not
-  on npm) — `.npmrc` turns `auto-install-peers` off, and the two packages the
-  tests actually import at runtime (schemastery, dsh-tools) are `link:`
-  devDependencies into the same checkout.
+  reliably on npm — most `@deepseek-ai/dsh-*` packages there are stuck many
+  minors behind) — `.npmrc` turns `auto-install-peers` off, and the packages
+  the tests actually import at runtime (schemastery, dsh-tools, dsh-llm,
+  dsh-session, dsh-web) are `link:` devDependencies into the same checkout.
+  Both the `paths` entries and the `link:` targets point at `./.dsh-harness`
+  — a gitignored symlink, not a real directory — so neither file needs
+  per-developer edits: point that one symlink at your own checkout with
+  `npm run link-harness -- /path/to/deepseek-harness` (or set
+  `DSH_HARNESS_PATH`). See the README's Development section.
 - Source comments are written in Chinese, per-function, for readers who don't
   know dsh/Node (in-depth architecture notes live in internal docs, not in
   this repo). Keep new code commented in the same style and density.

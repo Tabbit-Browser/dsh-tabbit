@@ -6,8 +6,4 @@ coverage/
 docs/
 lib/
 .dsh-test-home/
-AGENTS.md
-
-# Internal-only tooling: syncs builds into the closed-source Tabbit Browser
-# checkout and references that repo's internal layout. Not for the public repo.
-scripts/sync-to-browser.sh
+.dsh-harness
