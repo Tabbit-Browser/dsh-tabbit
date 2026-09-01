@@ -1,6 +1,6 @@
 # dsh-tabbit — Tabbit 的 DeepSeek Harness 官方插件
 
-[English](README.en.md) | **简体中文**
+[English](README.en.md) | **简体中文** | [Changelog](CHANGELOG.md)
 
 ![Tabbit Browser for DeepSeek Harness](assets/dsh-tabbit-banner.png)
 

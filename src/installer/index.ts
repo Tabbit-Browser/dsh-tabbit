@@ -41,7 +41,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Context } from '@deepseek-ai/cordis';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import type { JobId } from '@deepseek-ai/dsh-jobs';
-import type { JsonValue } from '@deepseek-ai/dsh-session';
+import type { JsonValue } from '@deepseek-ai/dsh-util-values';
 
 import {
   detectTabbitInstallations,

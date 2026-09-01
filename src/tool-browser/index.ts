@@ -39,7 +39,7 @@ import { TabbitCliError } from '../runtime/errors.js';
 
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
-import type { JsonValue } from '@deepseek-ai/dsh-session';
+import type { JsonValue } from '@deepseek-ai/dsh-util-values';
 import type {} from '../core/index.js';
 
 /*

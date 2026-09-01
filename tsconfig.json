@@ -32,6 +32,7 @@
       "@deepseek-ai/dsh-jobs": ["./.dsh-harness/packages/jobs/jobs/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-session": ["./.dsh-harness/packages/core/session/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-session/types": ["./.dsh-harness/packages/core/session/lib/types/types.d.ts"],
+      "@deepseek-ai/dsh-util-values": ["./.dsh-harness/packages/util/values/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-llm": ["./.dsh-harness/packages/llm/llm/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-attachment": ["./.dsh-harness/packages/attachment/attachment/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-commands": ["./.dsh-harness/packages/interaction/commands/lib/types/index.d.ts"],
