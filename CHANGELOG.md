@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3
+
+- Restored web-client compatibility with DSH `0.1.1-rc.2`. The client no
+  longer hard-injects either generation of the conversation service: it uses
+  `uiConversation.events` on DSH `0.1.2-alpha.1+` and falls back to
+  `conversationEvents` on `0.1.1`, so neither host remains pending while
+  waiting for the other generation's service name.
+
 ## 0.3.2
 
 - `tabbit_browser` gains `list_tasks: true`: a zero-side-effect readback of

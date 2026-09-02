@@ -35,9 +35,11 @@ var module = { exports: {} }; var exports = module.exports;
  * dsh 客户端插件协议与服务端 Cordis 如出一辙：导出 {name, inject, apply(ctx)}；
  * 这里注入的 'inputTriggers' 是 dsh-client-ui-input-trigger 提供的"输入框
  * 触发菜单"服务（package.json dsh.client.inject 里声明了要它一起装）；
- * 'uiConversation'/'slots' 是 web 客户端核心恒定提供的服务，不用额外声明
- * （'uiConversation' 是宿主 0.1.2-alpha.1 客户端重构后 'conversationEvents'
- * 的新名字，注册入口相应从 service.register() 移到了 service.events.register()）。
+ * 'slots' 是 web 客户端核心恒定提供的服务；会话节点注册服务在宿主
+ * 0.1.2-alpha.1 从 'conversationEvents' 政名为 'uiConversation'，注册入口
+ * 也从 service.register() 移到了 service.events.register()。两者不能作为
+ * 硬注入，否则另一代宿主会让整个客户端插件永久 pending，故在 apply
+ * 中按新接口优先、旧接口兜底的顺序探测。
  * 共享的触发菜单负责渲染候选列表 UI——@tab 部分只提供数据，不需要 React。
  *
  * 功能三：把服务端 /tabbit-info 命令落下的 tabbit/status 会话事件折成
@@ -346,7 +348,7 @@ const tabbitStatusNode = {
 
 module.exports = {
   name: 'dsh-tabbit-client',
-  inject: ['inputTriggers', 'uiConversation', 'slots'],
+  inject: ['inputTriggers', 'slots'],
   apply(ctx) {
     // 观看实例打点：告诉服务端"是哪个浏览器在看这个页面"。fire-and-forget
     // （不 await、双层吞错）——纯属锦上添花的提示，任何失败都不能影响页面。
@@ -371,14 +373,19 @@ module.exports = {
       }
     }
 
-    // 功能三：/tabbit-info 状态卡。uiConversation/slots 已在 inject 里
-    // 声明（apply 只会在它们就绪后运行），这里仍按本文件惯例做形状防御。
-    // 两者内部都是 ctx.effect 式注册（随插件 fiber 卸载自动回收），直接调。
+    // 功能三：/tabbit-info 状态卡。新宿主使用 uiConversation.events，
+    // 0.1.1 宿主使用 conversationEvents；只要任一接口存在就注册状态卡。
+    // 服务内部都是 ctx.effect 式注册（随插件 fiber 卸载自动回收），直接调。
     const uiConversation = ctx.get('uiConversation');
+    const conversationEvents = ctx.get('conversationEvents');
     const slots = ctx.get('slots');
-    if (uiConversation && typeof uiConversation.events?.register === 'function'
-        && slots && typeof slots.inject === 'function') {
-      uiConversation.events.register(tabbitStatusNode);
+    const registerStatusNode = typeof uiConversation?.events?.register === 'function'
+      ? (definition) => uiConversation.events.register(definition)
+      : typeof conversationEvents?.register === 'function'
+        ? (definition) => conversationEvents.register(definition)
+        : undefined;
+    if (registerStatusNode && slots && typeof slots.inject === 'function') {
+      registerStatusNode(tabbitStatusNode);
       slots.inject('conversation.chat.node', () => slots.register(
         { name: 'conversation.chat.node', key: 'tabbit-status' },
         TabbitStatusNodeView,

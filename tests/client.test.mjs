@@ -16,15 +16,18 @@ function loadClient(fakeReact) {
   })
 }
 
-/* 三个宿主服务的最小假件：记录注册物，形状对齐各自服务契约。 */
-function mockServices({ registeredNodes, slotRegistrations, sources }) {
+/* 宿主服务的最小假件：可切换新旧会话 API，记录真实的注册结果。 */
+function mockServices({ registeredNodes, slotRegistrations, sources, conversationApi = 'new' }) {
   return {
     get(name) {
       if (name === 'inputTriggers') {
         return { registerSource: (source) => { sources.push(source); return () => {} } }
       }
-      if (name === 'uiConversation') {
+      if (name === 'uiConversation' && conversationApi === 'new') {
         return { events: { register: (definition) => { registeredNodes.push(definition); return () => {} } } }
+      }
+      if (name === 'conversationEvents' && conversationApi === 'old') {
+        return { register: (definition) => { registeredNodes.push(definition); return () => {} } }
       }
       if (name === 'slots') {
         return {
@@ -32,7 +35,7 @@ function mockServices({ registeredNodes, slotRegistrations, sources }) {
           register: (spec, view) => ({ spec, view }),
         }
       }
-      throw new Error(`unexpected service: ${name}`)
+      return undefined
     },
     effect(fn) { const cleanup = fn(); return () => cleanup?.() },
   }
@@ -42,7 +45,7 @@ test('registers the @tab source and the tabbit-status chat node', () => {
   const fakeReact = { createElement: (type, props, ...children) => ({ type, props, children }), useState: () => [false, () => {}] }
   const client = loadClient(fakeReact)
   assert.equal(client.name, 'dsh-tabbit-client')
-  assert.deepEqual(client.inject, ['inputTriggers', 'uiConversation', 'slots'])
+  assert.deepEqual(client.inject, ['inputTriggers', 'slots'])
 
   const registeredNodes = []
   const slotRegistrations = []
@@ -77,6 +80,39 @@ test('registers the @tab source and the tabbit-status chat node', () => {
   assert.equal(slotRegistrations[0].slot, 'conversation.chat.node')
   const seat = slotRegistrations[0].callback()
   assert.equal(seat.spec.key, 'tabbit-status')
+})
+
+test('registers the status node through the DSH 0.1.1 conversationEvents service', () => {
+  const fakeReact = { createElement: (type, props, ...children) => ({ type, props, children }), useState: () => [false, () => {}] }
+  const client = loadClient(fakeReact)
+  const registeredNodes = []
+  const slotRegistrations = []
+  const sources = []
+
+  client.apply(mockServices({
+    registeredNodes, slotRegistrations, sources, conversationApi: 'old',
+  }))
+
+  assert.equal(sources.length, 1)
+  assert.equal(registeredNodes.length, 1)
+  assert.equal(registeredNodes[0].kind, 'tabbit-status')
+  assert.equal(slotRegistrations.length, 1)
+})
+
+test('keeps @tab active when no conversation status-card service exists', () => {
+  const fakeReact = { createElement: (type, props, ...children) => ({ type, props, children }), useState: () => [false, () => {}] }
+  const client = loadClient(fakeReact)
+  const registeredNodes = []
+  const slotRegistrations = []
+  const sources = []
+
+  client.apply(mockServices({
+    registeredNodes, slotRegistrations, sources, conversationApi: 'none',
+  }))
+
+  assert.equal(sources.length, 1)
+  assert.equal(registeredNodes.length, 0)
+  assert.equal(slotRegistrations.length, 0)
 })
 
 test('renders the status card with a language-following details toggle', () => {
