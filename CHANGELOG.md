@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Fixed installer background jobs on DSH 0.1.7+ while retaining Agent ownership on older hosts.
+- Expanded peer dependency ranges to accept published DSH prerelease series through 0.2.2.
+- Removed the `/tabbit-info` command and its commands-service dependency.
+
 ## 0.4.0
 
 - The `@` menu gains a dedicated "标签组" (tab groups) section: groups are

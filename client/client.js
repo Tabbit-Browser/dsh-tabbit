@@ -43,14 +43,9 @@ var module = { exports: {} }; var exports = module.exports;
  * 触发菜单"服务（package.json dsh.client.inject 里声明了要它一起装）；
  * 共享的触发菜单负责渲染候选列表 UI——@tab 部分只提供数据，不需要 React。
  *
- * 这里刻意【没有】/tabbit-info 状态卡。0.3.3 及之前本文件还注册过一个
- *   聊天节点，靠服务端落一条自定义 tabbit/status 会话事件驱动；宿主持久
- *   层对不认识的事件类型只认信封上的 ignorable 标记、而插件侧没有设置它
- *   的入口，结果是含该事件的会话冷加载时整个被拒读（issue #22）。
- *   /tabbit-info 的报告现在只走 CommandResult.text，由宿主自带的命令节点
- *   渲染；代价是空白会话里命令文本不渲染——这是宿主客户端的限制，不该
- *   用写坏日志的方式绕过。宿主提供 ignorable 通道前，不要恢复自定义会话
- *   事件（见 AGENTS.md）。
+ * 历史版本的 tabbit/status 自定义会话事件会导致日志冷加载失败（issue #22）。
+ * 宿主持久层对未知事件要求 ignorable 标记，插件侧尚无设置入口；因此不要
+ * 恢复自定义状态卡或向会话追加自定义事件（见 AGENTS.md）。
  */
 
 /*

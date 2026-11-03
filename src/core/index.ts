@@ -10,10 +10,8 @@
  *   2. 注册 settings 命名空间 `tabbit`（instance/launcherPath/pageAccess/intranetFetch）；
  *   3. 注册随包 skill `tabbit`（教模型怎么用工具的文档；与浏览器写入
  *      ~/.agents/skills/tabbit 的共享 skill 同名——刻意的，见 SKILL_NAME 注释）；
- *   4. 注册 `/tabbit-info` 诊断命令（不叫 /tabbit：userInvocable skill 的
- *      `/名字` 调用入口会与之撞名）；
- *   5. 往系统提示词里注入一小段"你有浏览器能力"的说明；
- *   6. 清理历史版本安装的"Tabbit 模式" agent preset（迁移，见 removeManagedPreset）。
+ *   4. 往系统提示词里注入一小段"你有浏览器能力"的说明；
+ *   5. 清理历史版本安装的"Tabbit 模式" agent preset（迁移，见 removeManagedPreset）。
  *
  * ─── 必备背景 1：dsh 与 Cordis 插件模型 ─────────────────────────────────
  *
@@ -27,12 +25,12 @@
  *  - 【服务】= 挂在 ctx 上的具名能力。`ctx.provide('tabbit', 实例)` 发布服务；
  *    其它插件在 inject 里写 'tabbit' 后就能用 `ctx.tabbit` 拿到实例。
  *    dsh 自身的核心能力也都是服务：ctx.settings（设置）、ctx.tools（工具注册）、
- *    ctx.web（web 能力）、ctx.skills、ctx.commands、ctx.jobs（后台任务）、
+ *    ctx.web（web 能力）、ctx.skills、ctx.jobs（后台任务）、
  *    ctx.approval（用户审批）、ctx.webServer（HTTP 路由）等。
  *
  *  - 【ctx.inject(名单, 回调)】= "软依赖"：不阻塞本插件加载，等名单里的服务
  *    可用时再执行回调（服务卸载时回调注册的东西也随之回收）。本文件用它挂
- *    skills/commands/systemPrompt——这些服务不在时核心功能照常工作。
+ *    skills/systemPrompt——这些服务不在时核心功能照常工作。
  *
  *  - 【ctx.effect(fn, 说明)】= 注册"副作用"：fn 返回一个清理函数，插件被
  *    卸载（disposal）时框架自动调用清理函数。这是 Cordis 的资源生命周期
@@ -66,16 +64,15 @@ import { TabbitClient } from '../runtime/client.js';
 import { listAllTabs, type TabbitTabInventory } from '../runtime/endpoint.js';
 import { TabbitCliError } from '../runtime/errors.js';
 import { defaultLauncherPath, listInstances, type TabbitInstance } from '../runtime/instances.js';
-import { checkPluginUpdate, prependUpdateNotice, readLocalVersion } from '../update-check.js';
+import { checkPluginUpdate, prependUpdateNotice } from '../update-check.js';
 import { migrateLegacySettings } from './legacy-settings.js';
 
 // 下面这些 `import type {}` 是 TypeScript 的"类型副作用导入"：不引入任何
 // 运行时代码，只为了让这些包对 Context 接口的类型扩充（declare module）生效，
-// 这样 ctx.settings / ctx.skills / ctx.commands 等才有类型。
+// 这样 ctx.settings / ctx.skills 等才有类型。
 import type {} from '@deepseek-ai/dsh-settings';
 import type {} from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-skill';
-import type {} from '@deepseek-ai/dsh-commands';
 import type {} from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 
@@ -364,7 +361,7 @@ export class TabbitService {
    *    是干嘛的；
    *  - id4：agentId 去掉 "session-" 前缀后的前 4 个 hex 字符，是 dsh 会话 id
    *    的真实片段。它有两个不可去掉的作用：① 把浏览器里可见的标签组关联回
-   *    具体 dsh 会话（/tabbit-info、CLI `tasks` 排障时对得上号）；② 防止不同会话
+   *    具体 dsh 会话（CLI `tasks` 排障时对得上号）；② 防止不同会话
    *    撞出同一个任务名而共用一个任务。
    */
   defaultTaskFor(agentId: string, label?: string): string {
@@ -776,168 +773,4 @@ export function apply(ctx: Context, config: CurrentConfig): void {
       text: PROMPT_SECTION_TEXT,
     });
   });
-
-  // ⑧ 软依赖 commands 服务：注册 /tabbit-info 诊断命令（用户在 dsh 输入框里
-  //    敲）。不叫 /tabbit：skill 已改名 tabbit 且 userInvocable——dsh 里用户
-  //    可用 `/名字` 直接调用 skill，命令名与之撞名会互相遮蔽。
-  ctx.inject(['commands'], (commandCtx) => {
-    commandCtx.commands.register({
-      name: 'tabbit-info',
-      description: 'Show Tabbit Browser integration status: launcher, instances, tasks, permissions.',
-      handler: async () => {
-        try {
-          const report = await renderStatus(service, readLocalePreference(ctx.settings));
-          // 整份报告只放进 CommandResult.text，由宿主落成它自己认识的
-          // command/done 事件。【不要】改回 session.append 自定义事件类型：
-          // 宿主持久层对不认识的事件类型只认信封上的 ignorable 标记，而
-          // Session.append 没有设置该标记的入口——0.3.3 及之前落下的
-          // tabbit/status 事件让整个会话在冷加载时被拒读（issue #22）。宿主
-          // 提供 ignorable 通道前，本插件不得向会话日志追加任何自定义事件
-          // 类型（见 AGENTS.md）。
-          return { kind: 'success', text: report };
-        } catch (error) {
-          return { kind: 'error', text: `tabbit status failed: ${String((error as Error)?.message ?? error)}` };
-        }
-      },
-    });
-  });
-}
-
-/*
- * /tabbit-info 首行结论的用户语言。locale.preference 由 dsh 的 locale 插件
- * 注册（zh/en，存用户设置文档）；未设置时 dsh 客户端跟随浏览器语言并兜底
- * en——服务端看不到浏览器语言，因此同样兜底 en，与 dsh 的 FALLBACK_LOCALE
- * 取向一致（浏览器没点名 shipped 语言时，读中文的可能性最低）。
- */
-function readLocalePreference(settings: Context['settings']): 'zh' | 'en' {
-  const source = settings as unknown as {
-    get?: (name: string) => unknown;
-    describe?: () => { ns: string; value?: unknown }[];
-  };
-  const legacy = source.get?.('locale') as { preference?: unknown } | undefined;
-  const current = source.describe?.().find((entry) => entry.ns === 'locale')?.value as { preference?: unknown } | undefined;
-  return (legacy?.preference ?? current?.preference) === 'zh' ? 'zh' : 'en';
-}
-
-/*
- * 首行结论：用户在收起的命令行上能扫到的只有这一行，所以按“是否需要
- * 用户采取行动”给结论——未安装提醒装/启动、未运行提醒启动、多实例时
- * 告知会优先用最近使用的实例，正常时给一句可读的状态摘要。明细行保持
- * 英文技术格式（可直接贴进 issue），不复述结论。
- */
-function statusConclusion(
-  service: TabbitService,
-  settings: TabbitSettings,
-  launcher: string,
-  locale: 'zh' | 'en',
-): string {
-  const t = (zh: string, en: string) => (locale === 'zh' ? zh : en);
-  if (!existsSync(launcher)) {
-    return t(
-      '⚠️ 未找到 Tabbit 浏览器——请先启动（或安装）Tabbit Browser，再运行 /tabbit-info',
-      '⚠️ Tabbit Browser not found — launch (or install) Tabbit Browser first, then rerun /tabbit-info',
-    );
-  }
-  const onlineInstances = service.instances().filter((instance) => instance.online);
-  if (onlineInstances.length === 0) {
-    return t(
-      '⚠️ Tabbit 浏览器已安装但未在运行——请启动 Tabbit Browser 后重试',
-      '⚠️ Tabbit Browser is installed but not running — launch Tabbit Browser and retry',
-    );
-  }
-  if (!settings.instance && onlineInstances.length > 1) {
-    // 多实例不再当警告：正常使用中 dsh-web 的观看实例打点（viewer）几乎
-    // 总在，解析会落在"当前正在看 dsh 的那个实例"上；需要锁死再设
-    // tabbit.instance（明细行里保留了这条提示）。
-    return t(
-      `✅ 检测到 ${onlineInstances.length} 个在线 Tabbit 浏览器实例，会优先使用最近使用的实例`,
-      `✅ ${onlineInstances.length} Tabbit Browser instances online — preferring the most recently used one`,
-    );
-  }
-  const resolved = service.resolveExecutionInstance();
-  const execution =
-    resolved.id !== undefined
-      ? t(`${resolved.id}（来源 ${resolved.source}）`, `${resolved.id} (via ${resolved.source})`)
-      : t('唯一在线实例（auto）', 'the single online instance (auto)');
-  return t(
-    `✅ Tabbit 集成正常——${onlineInstances.length} 个实例在线，执行实例 ${execution}`,
-    `✅ Tabbit integration OK — ${onlineInstances.length} instance(s) online, executing on ${execution}`,
-  );
-}
-
-/*
- * /tabbit-info 命令的输出渲染：首行结论（跟随用户语言），空行，然后是
- * 插件与宿主版本、实例列表（在线/选中标记 + 多实例提示）、生效实例及来源、
- * 观看实例、权限设置、任务占用表。
- *
- * 版本行放明细第一行：排障时第一个要确认的就是"跑的到底是哪个版本"——
- * dsh profile 里 link 到本地 checkout、装了多份、改了声明没重新 install 等
- * 情况下，"以为在跑的版本"和"实际加载的版本"经常不是一回事（真机踩过：
- * package.json 已改指新 checkout，node_modules 里的符号链接还指着旧仓库）。
- * 插件版本来自本包 package.json（update-check.ts 的 readLocalVersion），宿主
- * 版本来自 host-version.ts；任一读不到就如实标 unknown / 省略，绝不因此让
- * 整份报告失败。
- */
-async function renderStatus(service: TabbitService, locale: 'zh' | 'en'): Promise<string> {
-  const settings = service.currentSettings();
-  const launcher = service.launcherPath();
-  const lines: string[] = [];
-  lines.push(statusConclusion(service, settings, launcher, locale));
-  lines.push('');
-
-  const pluginVersion = (await readLocalVersion()) ?? '(version unknown)';
-  const hostVersion = readHostVersion();
-  lines.push(`plugin: dsh-tabbit ${pluginVersion}${hostVersion !== undefined ? ` · host dsh ${hostVersion}` : ''}`);
-
-  const instances = service.instances();
-  if (instances.length === 0) {
-    lines.push('instances: none registered');
-  } else {
-    lines.push('instances:');
-    for (const instance of instances) {
-      const marks = [instance.online ? 'online' : 'offline', settings.instance === instance.id ? 'selected' : '']
-        .filter(Boolean)
-        .join(', ');
-      lines.push(`  - ${instance.id}  ${instance.appName}  (${marks})`);
-    }
-    if (!settings.instance && instances.filter((instance) => instance.online).length > 1) {
-      lines.push('  ! multiple instances online — set settings key tabbit.instance to one of the ids above');
-    }
-  }
-
-  const resolved = service.resolveExecutionInstance();
-  if (resolved.id !== undefined) {
-    lines.push(`execution instance: ${resolved.id} (via ${resolved.source})`);
-  } else {
-    lines.push('execution instance: auto (single online instance, else guided error)');
-  }
-  const viewer = service.viewer();
-  if (viewer !== undefined) {
-    lines.push(`dsh-web viewer: ${viewer.id} (detected ${new Date(viewer.at).toISOString()})`);
-  }
-
-  lines.push(`permissions: pageAccess=${settings.pageAccess}, intranetFetch=${settings.intranetFetch}`);
-
-  // 任务列表只在"有在线实例（查询不会有副作用）或全机只装一个实例"时查询：
-  // 浏览器全离线时任何 CLI 调用都会把浏览器拉起来——诊断命令不该有这种副作用。
-  const online = instances.some((instance) => instance.online);
-  if (online || instances.length === 1) {
-    try {
-      const tasks = await service.client().listTasks();
-      if (tasks.length === 0) {
-        lines.push('tasks: none');
-      } else {
-        lines.push(`tasks (${tasks.length}/8):`);
-        for (const task of tasks) {
-          const flags = [task.idle ? 'idle' : 'active', task.quarantined ? 'QUARANTINED' : ''].filter(Boolean).join(', ');
-          lines.push(`  - ${task.taskName}  (${flags})`);
-        }
-      }
-    } catch (error) {
-      lines.push(`tasks: unavailable (${String((error as Error)?.message ?? error)})`);
-    }
-  } else {
-    lines.push('tasks: browser offline (skipped to avoid launching it)');
-  }
-  return lines.join('\n');
 }

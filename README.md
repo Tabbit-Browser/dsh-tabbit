@@ -17,7 +17,6 @@ Tabbit Browser 的 DeepSeek Harness（dsh）插件包（bundle）。dsh 可以�
 | **独立"页面读取"权限** | 完善的权限控制。因为与用户共享 cookie，dsh 访问 Tabbit 网页时会确认权限`pageAccess`（默认每会话询问一次）+ `intranetFetch`（web_fetch 访问内网目标默认逐次审批）。 |
 | **`tabbit_browser_install` 工具** | 环境预检：检测已装稳定版 Tabbit、校验 launcher 与 Runtime Service；缺装/过旧时以 dsh 后台任务下载 Tabbit。 |
 | **`tabbit_plugin_update` 工具** | 插件更新检查：每天最多查一次 npm 上的最新发布，有合适版本会离线静默安装； |
-| **`/tabbit-info` 命令** | 在 dsh 输入框内输入 `/tabbit-info` 可诊断：插件与宿主 DSH 版本、launcher、实例列表（含产品名）、生效实例及来源、权限设置、任务占用。 |
 | **`tabbit` skill** | 告知模型使用 Tabbit 的最佳实践。默认使用 Tabbit 自带的 `~/.agents/skills/tabbit/` 的官方 skill（随浏览器 Runtime 同步演进）。本插件内为兜底版本。 |
 
 ## 安装
@@ -26,7 +25,6 @@ Tabbit Browser 的 DeepSeek Harness（dsh）插件包（bundle）。dsh 可以�
 
 - 已安装稳定版 Tabbit Browser（[国际版](https://www.tabbit.ai) 或 [国内版](https://www.tabbit.com/)，≥1.9.0），且启动过（首次启动时注册 CLI launcher）；
 - Node ≥ 22.19、dsh ≥ 0.1.1-rc.2（dsh 安装：`npm install -g @deepseek-ai/dsh`）。低于 0.1.2-alpha.1 的宿主上，网页版会话里内置的 `web_fetch` 工具不可用（`tabbit_browser` 不受影响）。
-
 
 ### 安装 dsh-tabbit
 ```bash
@@ -72,8 +70,6 @@ DSH 0.1.x：将这四项写在 `$DSH_HOME/settings.yaml` 的 `tabbit:` 节下。
 2. **正在查看 dsh-web 的 Tabbit 实例**（自动检测：页面加载时 client 插件向 `/tabbit/instance-hint` 打点，服务端由 loopback socket 对端进程沿父链匹配实例注册表的 `browserPid`；仅 macOS，非 Tabbit 浏览器打开时自然不命中）——"在哪个 Tabbit 里看，就在哪个 Tabbit 里执行"；
 3. 继承的 `TABBIT_PLAYWRIGHT_INSTANCE` 环境变量（嵌入形态：Tabbit 启动打包的 dsh 时注入自己的实例 id，即为权威通道）；
 4. 注册表自动选择（唯一在线实例；歧义时报带实例列表的引导错误。Windows 上注册表不可读时委托原生 CLI 自行选择）。
-
-当前生效来源可用 `/tabbit-info` 命令查看（`execution instance: ... (via ...)`）。
 
 Full access 说明：dsh 的 `danger-full-access` 权限预设会给会话写入审批策略 `never`（dsh 定义为"自动拒绝一切询问"）。本插件的权限门检测到该覆盖时**自动放行**，不再发出注定被拒的询问——Full access 就是完全访问（该模式下 bash 本就不受限，单拦浏览器工具没有防御价值）。例外：部署级把审批默认配成 `never`（非会话覆盖）时公开 API 读不到，仍会被拒；无审批通道的组合（如某些 headless 编排）会得到指明 `tabbit.pageAccess: always` 出路的拒绝信息。
 

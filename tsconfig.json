@@ -34,7 +34,6 @@
       "@deepseek-ai/dsh-util-values": ["./.dsh-harness/packages/util/values/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-llm": ["./.dsh-harness/packages/llm/llm/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-attachment": ["./.dsh-harness/packages/attachment/attachment/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-commands": ["./.dsh-harness/packages/interaction/commands/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-system-prompt": ["./.dsh-harness/packages/core/system-prompt/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-host-webserver": ["./.dsh-harness/packages/host/webserver/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-user-approval": ["./.dsh-harness/packages/interaction/user-approval/lib/types/index.d.ts"]

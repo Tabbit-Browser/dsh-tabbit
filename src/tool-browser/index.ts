@@ -522,7 +522,7 @@ function stripAttachmentNoise(textual: Record<string, unknown>, screenshots: Scr
 
 /*
  * 按错误类别给 CLI 错误补一句"接下来该怎么办"的提示（给模型看）：
- * 没装 → 说明未安装；实例歧义 → 指路 /tabbit-info 和 settings；暂不可用/忙 →
+ * 没装 → 说明未安装；实例歧义 → 指路 settings；暂不可用/忙 →
  * 建议稍后重试；超时 → 提醒先核实页面状态再重试带副作用的操作。
  */
 function friendlyCliError(error: TabbitCliError): string {
@@ -530,7 +530,7 @@ function friendlyCliError(error: TabbitCliError): string {
     case 'launcher-missing':
       return `${error.message} (Tabbit Browser integration is not installed on this machine.)`;
     case 'instance-selection':
-      return `${error.message} (Run /tabbit-info to list instances, then set settings key tabbit.instance.)`;
+      return `${error.message} (Set settings key tabbit.instance to the desired instance ID listed above.)`;
     case 'browser-unavailable':
       return `${error.message} (Tabbit Browser may be starting; retry shortly.)`;
     case 'busy':

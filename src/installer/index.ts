@@ -33,7 +33,7 @@
  *     createDownloadJob）；
  *   - dsh 会轮询 readOutput() 把输出渐进展示给用户、在 done 落定时通知——
  *     也就是说下载进度和完成提醒【不用我们自己做 UI】，挂上 jobs 就有；
- *   - owner 关联到发起的 Agent；ctx.jobs.get(jobId, owner) 可查快照状态。
+ *   - 新版 owner 是会话 ID，旧版是 Agent；查询时须使用同一种所有者身份。
  */
 import { existsSync } from 'node:fs';
 
@@ -98,6 +98,9 @@ export interface InstallerToolOverrides {
 export function registerInstallerTool(ctx: Context, overrides: InstallerToolOverrides = {}): void {
   const detect = overrides.detect ?? detectTabbitInstallations;
   const detectRuntime = overrides.detectRuntime ?? detectTabbitRuntimeProcesses;
+  // DSH 0.1.7 起以会话 ID 隔离任务，并以 events 替换 onJobDone。
+  // 用旧接口特征判断宿主代际，不执行任务探测，避免失败重试重复启动下载。
+  const legacyJobs = typeof (ctx.jobs as unknown as { onJobDone?: unknown }).onJobDone === 'function';
   // 两张按 Agent 记账的表。用 WeakMap 的原因：键是 Agent 对象本身，会话
   // 销毁、Agent 被垃圾回收时对应条目自动消失，不需要手动清理。
   /* Agent → 已缓存的 ready 结果（"每会话只真查一次"）。 */
@@ -134,6 +137,9 @@ export function registerInstallerTool(ctx: Context, overrides: InstallerToolOver
     isConcurrencySafe: () => true,
     async execute(args, exec): Promise<JsonValue> {
       const owner = exec.agent;
+      // WeakMap 继续按 Agent 记账；仅在 jobs 边界适配宿主所有者契约。
+      // 本项目可链接两代声明，断言只限这一处，start/get 共享同一身份。
+      const jobOwner = (legacyJobs ? owner : owner?.id) as Parameters<Context['jobs']['get']>[1];
       // ── 第 1 步：会话缓存 ────────────────────────────────────────────
       if (owner !== undefined && args.refresh === true) readyByOwner.delete(owner);
       if (owner !== undefined && args.refresh !== true) {
@@ -151,7 +157,7 @@ export function registerInstallerTool(ctx: Context, overrides: InstallerToolOver
       const existingJobId = owner !== undefined ? activeJobs.get(owner) : undefined;
       if (existingJobId !== undefined) {
         try {
-          const snapshot = ctx.jobs.get(existingJobId, owner);
+          const snapshot = ctx.jobs.get(existingJobId, jobOwner);
           if (snapshot.status === 'running' || snapshot.status === 'stopping') {
             return {
               status: 'background',
@@ -181,7 +187,7 @@ export function registerInstallerTool(ctx: Context, overrides: InstallerToolOver
             kind: 'tabbit-installer',
             label: 'Download the region-appropriate Tabbit Browser installer',
             outputLimitBytes: 16 * 1024,
-            owner,
+            owner: jobOwner,
             // run 返回 download.ts 包好的 jobs 句柄；onSettled 里把 activeJobs
             // 的账销掉（只销"还是这单"的账，防止竞态覆盖后来者）。
             run: () => createDownloadJob({ onSettled: () => { if (owner !== undefined && activeJobs.get(owner) === jobId) activeJobs.delete(owner); } }),
@@ -221,7 +227,7 @@ export function registerInstallerTool(ctx: Context, overrides: InstallerToolOver
         // 顺带提醒可能需要选实例。
         const ambiguityNote =
           onlineInstances.length > 1
-            ? ` Multiple Tabbit instances are online (${onlineInstances.length}); run /tabbit-info and set settings key tabbit.instance if the wrong one gets picked.`
+            ? ` Multiple Tabbit instances are online (${onlineInstances.length}); set settings key tabbit.instance to the desired instance ID if the wrong one gets picked.`
             : runtime.ambiguous
               ? ` Multiple Tabbit runtime processes are running (${runtime.instanceCount}); set settings key tabbit.instance if the wrong one gets picked.`
               : '';

@@ -1,5 +1,5 @@
 // 插件注册层的单元测试：installer/update 两个工具（经 DI 假件驱动三态与
-// 会话缓存）+ core 的随包 skill provider + /tabbit-info 命令的事件落盘。
+// 会话缓存）+ core 的随包 skill provider。
 // 自 0.2.x 世代的测试改造而来。
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -208,73 +208,7 @@ test('the update tool defers to the browser for managed (preinstalled) copies', 
   assert.equal(checked, 0)
 })
 
-test('/tabbit-info 把整份报告放进命令结果文本，不向会话日志追加任何事件', async () => {
-  // 封闭性：HOME 指到空目录 → 实例注册表读不到（instances 为空、无 CLI
-  // 调用），settings 里 launcherPath 再指到不存在的路径 → 结论走“未安装”
-  // 分支。整个 handler 不碰真实浏览器/文件系统。
-  const emptyHome = await mkdtemp(join(tmpdir(), 'tabbit-test-home-'))
-  const savedHome = process.env.HOME
-  process.env.HOME = emptyHome
-  try {
-    const commands = []
-    const ctx = {
-      settings: {
-        register: () => ({
-          get: () => ({
-            instance: '',
-            launcherPath: join(emptyHome, 'missing-tabbit-cli'),
-            pageAccess: 'ask',
-            intranetFetch: 'ask',
-          }),
-        }),
-        get: () => undefined, // locale 未设置 → 兜底 en
-      },
-      skills: { registerProvider() {} },
-      systemPrompt: { section() {} },
-      commands: { register: definition => { commands.push(definition); return () => {} } },
-      provide() {},
-      on() {},
-      effect(fn) { const cleanup = fn(); return () => cleanup?.() },
-      inject(_names, callback) { callback(ctx) },
-      logger: { info() {}, warn() {} },
-    }
-    applyCore(ctx)
-
-    const info = commands.find(definition => definition.name === 'tabbit-info')
-    assert.ok(info, 'tabbit-info command registered')
-
-    // 回归守卫（issue #22）：宿主对不认识的事件类型整会话拒读，而插件没有
-    // 设置 ignorable 标记的入口——handler 绝不能碰 session.append。
-    const appended = []
-    const session = {
-      append(type, data) {
-        appended.push({ type, data })
-        return { type, seq: appended.length - 1 }
-      },
-    }
-    const result = await info.handler({
-      agent: { session },
-      rawInput: '',
-      signal: new AbortController().signal,
-    })
-
-    assert.equal(appended.length, 0)
-    assert.equal(result.kind, 'success')
-    assert.equal(result.sourceEventSeq, undefined)
-    // 命令文本就是整份报告：首行结论（跟随用户语言），后面跟英文明细。
-    assert.match(result.text, /^\u26a0\ufe0f Tabbit Browser not found/u)
-    assert.match(result.text, /\ninstances: none registered/u)
-    // 明细第一行是插件版本（本包 package.json）；宿主版本能读到时跟在同一行。
-    const versionLine = result.text.split('\n')[2]
-    assert.match(versionLine, /^plugin: dsh-tabbit \d+\.\d+\.\d+/u)
-    assert.match(versionLine, / · host dsh \d+\.\d+\.\d+/u)
-  } finally {
-    if (savedHome === undefined) delete process.env.HOME
-    else process.env.HOME = savedHome
-  }
-})
-
-test('DSH 0.2 Config supplies live settings and /tabbit-info reads the new locale form', async () => {
+test('DSH 0.2 Config supplies live settings', async () => {
   const emptyHome = await mkdtemp(join(tmpdir(), 'tabbit-config-home-'))
   const savedHome = process.env.HOME
   process.env.HOME = emptyHome
@@ -304,9 +238,7 @@ test('DSH 0.2 Config supplies live settings and /tabbit-info reads the new local
     assert.equal(service.currentSettings().pageAccess, 'ask')
     values.pageAccess = 'always'
     assert.equal(service.currentSettings().pageAccess, 'always')
-    const result = await commands[0].handler({})
-    assert.equal(result.kind, 'success')
-    assert.match(result.text, /^⚠️ 未找到 Tabbit 浏览器/u)
+    assert.equal(commands.length, 0)
   } finally {
     if (savedHome === undefined) delete process.env.HOME
     else process.env.HOME = savedHome
