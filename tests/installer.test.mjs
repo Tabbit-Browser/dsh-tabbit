@@ -11,6 +11,7 @@ import {
   downloadInstaller,
 } from '../lib/installer/download.js'
 import {
+  decodeConsoleOutput,
   detectMacInstallations,
   detectPlatformSpec,
   detectSystemRegion,
@@ -189,6 +190,26 @@ HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\{4A1F0C9E
   assert.equal(found.length, 1)
   assert.equal(found[0].edition, 'domestic')
   assert.equal(found[0].name, 'Tabbit Browser')
+})
+
+test('decodes non-UTF-8 console output with the detected code page, and keeps U+FFFD otherwise', () => {
+  // 简中 Windows 上 reg.exe 按控制台代码页（GBK/cp936）写输出：直接按 UTF-8 解，
+  // 用户名会变成 U+FFFD（实测 C:\Users\李云龙 → C:\Users\����），于是
+  // InstallLocation/DisplayIcon 里的真实路径被读坏。
+  const gbk = Buffer.concat([
+    Buffer.from('C:\\Users\\', 'ascii'),
+    // GBK 的「李云龙」
+    Buffer.from([0xc0, 0xee, 0xd4, 0xc6, 0xc1, 0xfa]),
+  ])
+  // 代码页在表内（简中）：按 GBK 解出正确路径。
+  assert.equal(decodeConsoleOutput(gbk, 'gbk'), String.raw`C:\Users\李云龙`)
+  // 代码页不在表内（或非 Windows）：保持修改前的 U+FFFD，而不是按错误的
+  // 代码页静默解成一串似是而非的错字。
+  assert.ok(decodeConsoleOutput(gbk, null).includes('\uFFFD'))
+  // 本来就是 UTF-8 的输出（macOS 的 plutil、英文 Windows 的 reg.exe）不受影响。
+  assert.equal(decodeConsoleOutput(Buffer.from('Tabbit Browser', 'utf8'), 'gbk'), 'Tabbit Browser')
+  // 空输入（命令没输出）不炸。
+  assert.equal(decodeConsoleOutput(undefined), '')
 })
 
 test('uses targeted Windows uninstall keys before the recursive fallback', () => {
