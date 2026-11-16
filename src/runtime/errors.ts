@@ -92,17 +92,19 @@ export type TabbitErrorKind =
 
 /*
  * 统一的错误类：所有从 CLI 层冒出来的失败都被包装成这个类抛出。
- * 继承自 JS 内置的 Error，附加了四个字段方便上层判断与排障：
+ * 继承自 JS 内置的 Error，附加了五个字段方便上层判断与排障：
  *   - kind：行为类别（见上面的 TabbitErrorKind）
  *   - code：CLI 原始错误码（或我们自己造的，如 CLIENT_TIMEOUT）
  *   - exitCode：子进程退出码（没有则为 null）
  *   - stderrRaw：stderr 原文（排障时看）
+ *   - stdoutRaw：stdout 原文（页面代码求值失败时真因在这里，见 cli.ts）
  */
 export class TabbitCliError extends Error {
   readonly kind: TabbitErrorKind;
   readonly code: string;
   readonly exitCode: number | null;
   readonly stderrRaw: string;
+  readonly stdoutRaw: string;
 
   constructor(options: {
     kind: TabbitErrorKind;
@@ -110,6 +112,7 @@ export class TabbitCliError extends Error {
     message: string;
     exitCode?: number | null;
     stderrRaw?: string;
+    stdoutRaw?: string;
   }) {
     // super() 调用父类 Error 的构造函数，把 message 存进去。
     super(options.message);
@@ -118,6 +121,7 @@ export class TabbitCliError extends Error {
     this.code = options.code;
     this.exitCode = options.exitCode ?? null;
     this.stderrRaw = options.stderrRaw ?? '';
+    this.stdoutRaw = options.stdoutRaw ?? '';
   }
 }
 
