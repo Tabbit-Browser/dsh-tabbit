@@ -12,6 +12,10 @@
  *   - 成功：stdout 打印一个 JSON 值，退出码 0；
  *   - 失败（应用层）：stderr 打印【一行 JSON】`{"ok":false,"error":{name,code,message}}`，
  *     退出码 64/69/70；
+ *   - 失败（页面代码求值出错）：真因在【stdout】上——`{"error":{name,code,message}}`
+ *     或失败信封 `{"status":"failed","error":"…","errorCode":"…"}`，退出码 70、
+ *     stderr 常为空（issue #29 真机实测）；解码失败时 stdout 也必须查，
+ *     否则这类失败只剩一个裸退出码、用户无从自查；
  *   - 失败（外壳层，实例选择问题）：stderr 打印【纯文本】，退出码 69；
  *   - ⚠️ 每次调用 launcher 都会把 stdin 读到 EOF 才继续——所以哪怕命令不需要
  *     stdin（如 `tasks`），也必须写完就关闭 stdin，否则子进程会永远挂着等输入；
@@ -133,6 +137,7 @@ export async function runCli(argv: string[], stdin: string, options: RunCliOptio
               message: 'Tabbit CLI call was cancelled',
               exitCode,
               stderrRaw: stderrText,
+              stdoutRaw: stdoutText,
             }),
           );
           return;
@@ -145,6 +150,7 @@ export async function runCli(argv: string[], stdin: string, options: RunCliOptio
               message: `Tabbit CLI did not respond within ${options.timeoutMs}ms and was killed`,
               exitCode,
               stderrRaw: stderrText,
+              stdoutRaw: stdoutText,
             }),
           );
           return;
@@ -170,8 +176,8 @@ export async function runCli(argv: string[], stdin: string, options: RunCliOptio
           }
           return;
         }
-        // 非零退出码：去 stderr 里解码失败原因。
-        reject(decodeFailure(exitCode, stderrText));
+        // 非零退出码：去 stderr 与 stdout 里解码失败原因。
+        reject(decodeFailure(exitCode, stderrText, stdoutText));
       });
     });
 
@@ -206,13 +212,16 @@ function spawnFailure(launcherPath: string, error: unknown): TabbitCliError {
 }
 
 /*
- * 解码非零退出码的失败。两种来源（见文件头契约）：
- *  1. 原生 CLI：stderr 里找以 '{' 开头的那一行，按 JSON 解析出
+ * 解码非零退出码的失败。三种来源（见文件头契约）：
+ *  1. 原生 CLI（应用层）：stderr 里找以 '{' 开头的那一行，按 JSON 解析出
  *     {error:{name,code,message}}，交给 classifyAppError 归类；
- *  2. 外壳脚本：纯文本 stderr——退出码 69 时归类为"实例选择"问题
- *     （外壳只在这种情况下自己报错），其余归为协议层未知失败。
+ *  2. 页面代码求值出错：真因在 stdout 上——{"error":{name,code,message}} 或
+ *     失败信封 {"status":"failed","error":"…","errorCode":"…"}，同样归类；
+ *  3. 外壳脚本：纯文本 stderr——退出码 69 时归类为"实例选择"问题
+ *     （外壳只在这种情况下自己报错），其余归为协议层未知失败，
+ *     信息里带上 stdout 摘录，方便用户拿原文自查（issue #29）。
  */
-function decodeFailure(exitCode: number | null, stderrText: string): TabbitCliError {
+function decodeFailure(exitCode: number | null, stderrText: string, stdoutText: string): TabbitCliError {
   // stderr 可能混有日志行，只认以 '{' 开头的那一行 JSON。
   const jsonLine = stderrText
     .split('\n')
@@ -228,10 +237,23 @@ function decodeFailure(exitCode: number | null, stderrText: string): TabbitCliEr
         message: error.message ?? 'Unknown error',
         exitCode,
         stderrRaw: stderrText,
+        stdoutRaw: stdoutText,
       });
     } catch {
-      /* JSON 解析失败：落回下面的纯文本处理 */
+      /* JSON 解析失败：继续看 stdout，再落回下面的纯文本处理 */
     }
+  }
+  // stderr 没给出真因时看 stdout：页面代码抛的错由 CLI 写在这里（issue #29）。
+  const stdoutError = parseStdoutError(stdoutText);
+  if (stdoutError) {
+    return new TabbitCliError({
+      kind: classifyAppError(stdoutError),
+      code: stdoutError.code ?? 'REQUEST_FAILED',
+      message: stdoutError.message ?? 'Unknown error',
+      exitCode,
+      stderrRaw: stderrText,
+      stdoutRaw: stdoutText,
+    });
   }
   if (exitCode === 69) {
     return new TabbitCliError({
@@ -240,13 +262,49 @@ function decodeFailure(exitCode: number | null, stderrText: string): TabbitCliEr
       message: stderrText || 'The Tabbit CLI launcher could not select a Tabbit Browser instance.',
       exitCode,
       stderrRaw: stderrText,
+      stdoutRaw: stdoutText,
     });
   }
   return new TabbitCliError({
     kind: 'protocol',
     code: 'CLI_FAILED',
-    message: stderrText || `Tabbit CLI exited with code ${exitCode}`,
+    // stderr 为空时把 stdout 摘录带进信息里——真因常常只写在那里。
+    message:
+      stderrText ||
+      (stdoutText
+        ? `Tabbit CLI exited with code ${exitCode}; stdout: ${stdoutText.slice(0, 300)}`
+        : `Tabbit CLI exited with code ${exitCode}`),
     exitCode,
     stderrRaw: stderrText,
+    stdoutRaw: stdoutText,
   });
+}
+
+/*
+ * 从 stdout 里提取求值失败的真因（issue #29 真机实测的两种形态）：
+ *  - {"error":{name,code,message}}：与 stderr 应用层错误同构；
+ *  - {"status":"failed","error":"纯文本原因","errorCode":"…"}：失败信封，
+ *    error 是字符串，错误码在旁边的 errorCode 字段。
+ * 提取不到（不是 JSON、没有 error 字段）就返回 null，交给调用方兜底。
+ */
+function parseStdoutError(stdoutText: string): { name?: string; code?: string; message?: string } | null {
+  // stdout 正常时是一个完整的 JSON 值；混有日志行时同样只认 '{' 开头的那一行。
+  const jsonLine = stdoutText
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('{'));
+  if (!jsonLine) return null;
+  try {
+    const parsed = JSON.parse(jsonLine) as { error?: unknown; errorCode?: string };
+    if (parsed.error && typeof parsed.error === 'object') {
+      const error = parsed.error as { name?: string; code?: string; message?: string };
+      return { name: error.name, code: error.code, message: error.message };
+    }
+    if (typeof parsed.error === 'string') {
+      return { code: parsed.errorCode, message: parsed.error };
+    }
+  } catch {
+    /* 不是 JSON：返回 null */
+  }
+  return null;
 }
