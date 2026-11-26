@@ -2,7 +2,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import semver from 'semver'
 import { registerInstallerTool } from '../lib/installer/index.js'
 import { apply } from '../lib/core/index.js'
 
@@ -41,19 +40,17 @@ for (const legacy of [false, true]) {
   })
 }
 
-test('peer ranges accept supported DSH prereleases and preserve the host floor', async () => {
-  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-  for (const version of ['4.0.0', '4.1.0', '4.2.0-alpha.1']) {
-    assert.ok(semver.satisfies(version, manifest.peerDependencies['@deepseek-ai/cordis']))
+test('host packages are shared without version constraints or npm auto-installation', async () => {
+  const { dependencies, peerDependencies, peerDependenciesMeta } = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  )
+  for (const name of ['cordis', 'dsh-llm', 'dsh-settings', 'dsh-tools', 'dsh-web', 'schemastery']) {
+    assert.ok(Object.hasOwn(peerDependencies, `@deepseek-ai/${name}`), `${name} must be shared with DSH`)
   }
-  for (const [name, range] of Object.entries(manifest.peerDependencies)) {
-    if (!name.startsWith('@deepseek-ai/dsh-')) continue
-    for (const version of ['0.1.1-rc.2', '0.1.2-alpha.1', '0.1.3-alpha.1', '0.1.5-rc.3', '0.1.6-alpha.2', '0.1.7-rc.2', '0.2.0-rc.2', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-rc.5', '0.2.2', '0.2.3-alpha.1', '0.2.3-alpha.2']) {
-      assert.ok(semver.satisfies(version, range), `${name} must accept ${version}`)
-    }
-    for (const version of ['0.1.0', '0.1.1-rc.1', '0.1.2-alpha.0']) {
-      assert.ok(!semver.satisfies(version, range), `${name} must reject ${version}`)
-    }
+  for (const [name, range] of Object.entries(peerDependencies)) {
+    assert.equal(range, '*', `${name} must accept the host's version`)
+    assert.equal(dependencies[name], undefined, `${name} must come from the host`)
+    assert.equal(peerDependenciesMeta[name]?.optional, true, `npm must not auto-install ${name}`)
   }
 })
 

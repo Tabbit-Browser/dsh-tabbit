@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Fixed DSH updates that installed mismatched `dsh-settings` and Schemastery versions alongside `dsh-tabbit`.
+- Reuse the host's DSH packages without pinning their versions. Older hosts without volatile Schemastery fields continue to use the legacy settings schema.
+
 ## 0.5.0
 
 - New installs allow browser access and intranet `web_fetch` by default. Explicit permission settings still apply, including during migration from older DSH profiles.

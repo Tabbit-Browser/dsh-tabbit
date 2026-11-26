@@ -100,13 +100,15 @@ export const SETTINGS_SCHEMA: z<TabbitSettings> = z.object({
   intranetFetch: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always'),
 });
 
-/* 新版只把 volatile 字段投影到设置页；旧版仍从 SETTINGS_SCHEMA 读用户设置。 */
-export const Config = z.object({
-  instance: z.string().default('').volatile(),
-  launcherPath: z.string().default('').volatile(),
-  pageAccess: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always').volatile(),
-  intranetFetch: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always').volatile(),
-});
+/* 使用宿主提供的 Schemastery。新版将 volatile 字段投影到设置页，旧版使用普通字段。 */
+export const Config = typeof z.string().volatile === 'function'
+  ? z.object({
+    instance: z.string().default('').volatile(),
+    launcherPath: z.string().default('').volatile(),
+    pageAccess: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always').volatile(),
+    intranetFetch: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always').volatile(),
+  })
+  : SETTINGS_SCHEMA;
 
 interface LiveValue<T> { get(): T }
 type CurrentConfig = { [K in keyof TabbitSettings]: TabbitSettings[K] | LiveValue<TabbitSettings[K]> };

@@ -15,11 +15,11 @@ repo:`Tabbit-Browser/dsh-tabbit`.
   gitignored). Type resolution for `@deepseek-ai/*` uses `tsconfig.json`
   `paths` pointing at a local deepseek-harness checkout; runtime resolution is
   peerDependencies via the DSH profile's flat `node_modules` fallback.
-  peerDependencies state the HOST DSH floor (currently `0.1.2-alpha.1`, not
-  reliably on npm — most `@deepseek-ai/dsh-*` packages there are stuck many
-  minors behind) — `.npmrc` turns `auto-install-peers` off, and the packages
-  the tests actually import at runtime (schemastery, dsh-tools, dsh-llm,
-  dsh-session, dsh-web) are `link:` devDependencies into the same checkout.
+  Declare host packages as optional `*` peers so the profile supplies the
+  versions from its DSH release. Handle host API differences at runtime.
+  `.npmrc` turns `auto-install-peers` off. Development links dsh-tools,
+  dsh-llm, dsh-session, and dsh-web from the checkout and uses a separate
+  registry devDependency for Schemastery.
   Both the `paths` entries and the `link:` targets point at `./.dsh-harness`
   — a gitignored symlink, not a real directory — so neither file needs
   per-developer edits: point that one symlink at your own checkout with
@@ -59,8 +59,7 @@ npm version and GitHub Release must stay in lockstep:
    the `files` whitelist: the update check serves release notes from the
    published tarball.
    - If this release depends on harness behavior that didn't exist on the
-     previously-required floor (i.e. the `peerDependencies` floor in
-     `package.json` needs to move, not just get a routine bump), add a line
+     previously-required floor, add a line
      `Requires DSH >= X.Y.Z-tag.N.` as the entry's first line, before the
      bullet list. `update-check.ts`'s host-compatibility filter
      (`selectCompatibleVersion`) parses this exact format out of every
