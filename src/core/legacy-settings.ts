@@ -10,6 +10,9 @@ const SETTING_KEYS: SettingKey[] = ['instance', 'launcherPath', 'pageAccess', 'i
 const MIGRATION_MARKER = '.dsh-tabbit-settings-migrated';
 
 interface ProfileLocation { home: string; dir: string }
+interface LoaderRoot { loader?: { await(): Promise<void> } }
+const CORDIS_ROOT = Symbol.for('cordis.root');
+
 interface SettingsView {
   describe(): { ns: string; user?: unknown; revision: number }[];
   update(ns: string, patch: object, expectedRevision?: number): Promise<void>;
@@ -63,7 +66,9 @@ export async function migrateLegacySettings(ctx: Context): Promise<void> {
 
   const legacy = await readLegacySection(profile.home);
   if (legacy === undefined) return;
-  const loader = (ctx.root as unknown as { loader?: { await(): Promise<void> } }).loader;
+  // 新版 Cordis 把根上下文放在公共 symbol 上；旧版才从 root 属性读取。
+  const context = ctx as unknown as { [CORDIS_ROOT]?: LoaderRoot; root?: LoaderRoot };
+  const loader = (context[CORDIS_ROOT] ?? context.root)?.loader;
   if (loader === undefined) return;
   await loader.await();
   const settings = ctx.settings as unknown as SettingsView;

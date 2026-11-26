@@ -41,16 +41,11 @@ test('package name matches the published loader entry', () => {
   assert.doesNotMatch(patch, /name:\s+tabbit-browser\s*$/m)
 })
 
-test('the web row re-pins fetchProvider to this plugin and restates the search provider', async () => {
-  // alpha.1 基座给 web 行钉死 fetchProvider: http（config 优先于环境变量），
-  // 不替换这行，本包的 provider 注册了也永远不会被选中；而补丁是全量替换，
-  // searchProvider 基座原值漏写即丢。fetchProvider 的值必须与 src/web-fetch
-  // 里 provider 的注册 id 一致（防止两边各自改动后静默失联）。
-  const webRow = patch.match(/^- id: web\n  config:\n((?: {4}\S.*\n?)+)/m)
-  assert.ok(webRow, 'patch must replace the `web` service row config')
-  assert.match(webRow[1], /^ {4}searchProvider: deepseek-official$/m)
+test('the web row inherits host config and only overrides the registered fetch provider', async () => {
+  const webRow = patch.slice(patch.lastIndexOf('\n- id: web\n'))
   const providerSource = await readFile(new URL('../src/web-fetch/index.ts', import.meta.url), 'utf8')
   const providerId = providerSource.match(/readonly id = '([^']+)'/)?.[1]
-  assert.ok(providerId, 'fetch provider id not found in src/web-fetch/index.ts')
-  assert.match(webRow[1], new RegExp(`^ {4}fetchProvider: ${providerId}$`, 'm'))
+  assert.ok(providerId)
+  assert.match(webRow, /searchProvider: !!js ctx\.tabbitInheritedSearchProvider\(ctx\)/)
+  assert.ok(webRow.includes(`fetchProvider: ${providerId}`))
 })

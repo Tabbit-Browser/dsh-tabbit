@@ -13,7 +13,7 @@
 #                       原 config 里想保留的键必须在这里重新写一遍。
 #
 # 本补丁做三件事：
-#   1. 追加 Tabbit 集成的 6 个插件行（对应 src/ 下 6 个模块）；
+#   1. 追加 Tabbit 集成的 插件行（对应 src/ 下各模块）；
 #   2. 打开 dsh 内置 web_fetch 工具的开关（headless 等无 preset 的形态）；
 #   3. 把 web 服务钉死的 fetchProvider 从基座内置的直连 http 抓取器改钉为
 #      本包的浏览器代理 provider（见文末 web 行的注释——不改这行，我们的
@@ -26,12 +26,14 @@
     # 会静默消失。
     - id: tabbit-browser
       name: dsh-tabbit
-    # 其余 5 行用包的子路径导出（见 package.json 的 exports 表），
+    # 其余各行用包的子路径导出（见 package.json 的 exports 表），
     # 行名 → lib/ 下对应目录的编译产物。
     - id: tabbit-permissions
       name: dsh-tabbit/permissions
     - id: tabbit-tool-browser
       name: dsh-tabbit/tool-browser
+    - id: tabbit-web-config
+      name: dsh-tabbit/web-config
     - id: tabbit-web-fetch
       name: dsh-tabbit/web-fetch
     - id: tabbit-mentions
@@ -52,27 +54,10 @@
     fetch: true
     searchTimeoutMs: 60000
 
-# 接管 web_fetch 的 provider 选择（全量替换基座 web 服务行的 config）。
-#
-# 背景：dsh 0.1.2-alpha.1 起座位不再空缺——基座注册了内置 provider
-# `@deepseek-ai/dsh-web-fetch-http`（id `http`，匿名直连抓取、available()
-# 恒 true），并在本行 config 里钉死 `fetchProvider: http`。dsh 的选择语义
-# 没有优先级链：钉了 id 就只用它，且 config 优先于环境变量
-# DSH_WEB_FETCH_PROVIDER——所以必须替换本行，才能让我们在 src/web-fetch
-# 注册的 `tabbit-browser` provider 被选中。只禁用 web-fetch-http 行是不够
-# 的：钉子还在，会指向未注册的 id（WEB_PROVIDER_CONFIGURED_MISSING）。
-#
-# 为什么值得接管：内置直连抓取器无 JS 渲染、无登录态、不走系统代理（它把
-# 域名解析成 IP、要求全部公网单播后钉 IP 直连——在 fake-ip 模式代理的机器
-# 上一切域名都解析进 198.18.0.0/15 保留段，一律报 WEB_BLOCKED_URL）。浏览
-# 器代理没有这些短板，且配有 pageAccess/intranetFetch 双权限闸。
-#
-# 权衡（有意为之）：钉死后 Tabbit 浏览器不可用时，web_fetch 调用报
-# WEB_PROVIDER_CONFIGURED_UNAVAILABLE、不回落 http——工具仍可见，调用时才
-# 报错（tool-web 的既定语义）。
-#
-# ⚠️ searchProvider 是基座原值，必须原样重写（全量替换不深合并，漏写即丢）。
+# 旧版 DSH 在基座指定搜索服务，新版按模型选择，其他 bundle 也可以指定它。
+# Cordis 整段替换 config，所以保留之前各层的搜索选择，缺省时由 DSH 自动路由。
 - id: web
+  inject: [tabbitInheritedSearchProvider]
   config:
-    searchProvider: deepseek-official
+    searchProvider: !!js ctx.tabbitInheritedSearchProvider(ctx)
     fetchProvider: tabbit-browser

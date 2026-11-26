@@ -43,9 +43,12 @@ for (const legacy of [false, true]) {
 
 test('peer ranges accept supported DSH prereleases and preserve the host floor', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  for (const version of ['4.0.0', '4.1.0', '4.2.0-alpha.1']) {
+    assert.ok(semver.satisfies(version, manifest.peerDependencies['@deepseek-ai/cordis']))
+  }
   for (const [name, range] of Object.entries(manifest.peerDependencies)) {
     if (!name.startsWith('@deepseek-ai/dsh-')) continue
-    for (const version of ['0.1.1-rc.2', '0.1.2-alpha.1', '0.1.3-alpha.1', '0.1.5-rc.3', '0.1.6-alpha.2', '0.1.7-rc.2', '0.2.0-rc.2', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2']) {
+    for (const version of ['0.1.1-rc.2', '0.1.2-alpha.1', '0.1.3-alpha.1', '0.1.5-rc.3', '0.1.6-alpha.2', '0.1.7-rc.2', '0.2.0-rc.2', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-rc.5', '0.2.2', '0.2.3-alpha.1', '0.2.3-alpha.2']) {
       assert.ok(semver.satisfies(version, range), `${name} must accept ${version}`)
     }
     for (const version of ['0.1.0', '0.1.1-rc.1', '0.1.2-alpha.0']) {

@@ -156,27 +156,28 @@ export function apply(ctx: Context): void {
   registerContextInjection(ctx, stash);
 
   // 软依赖 webServer：无 web 服务器的组合（纯 CLI 形态）下本模块静默不装。
+  // 每条路由单独托管到这次注入的生命周期，热更新或服务重挂时即可释放路径。
   ctx.inject(['webServer'], (webCtx) => {
-    webCtx.webServer.register({
+    webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact',
       path: '/tabbit/mention/tabs',
       handler: (req, res) => handleRoster(ctx, req, res),
-    });
-    webCtx.webServer.register({
+    }));
+    webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact',
       path: '/tabbit/tabs',
       handler: (req, res) => handleAllTabs(ctx, req, res),
-    });
-    webCtx.webServer.register({
+    }));
+    webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact',
       path: '/tabbit/mention/extract',
       handler: (req, res) => handleExtract(ctx, stash, req, res),
-    });
-    webCtx.webServer.register({
+    }));
+    webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact',
       path: '/tabbit/instance-hint',
       handler: (req, res) => handleInstanceHint(ctx, req, res),
-    });
+    }));
   });
 }
 

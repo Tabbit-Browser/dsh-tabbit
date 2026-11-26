@@ -49,7 +49,15 @@ function mentionCtx(tabbit) {
     },
     inject(deps, cb) {
       assert.deepEqual(deps, ['webServer'])
-      cb({ webServer: { register: (route) => routes.set(route.path, route.handler) } })
+      cb({
+        effect: setup => setup(),
+        webServer: {
+          register(route) {
+            routes.set(route.path, route.handler)
+            return () => routes.delete(route.path)
+          },
+        },
+      })
     },
   }
   mentions.apply(ctx)
