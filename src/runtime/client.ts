@@ -157,10 +157,23 @@ interface Receipt {
   [key: string]: unknown;
 }
 
+type NodejsSyntax = 'legacy' | 'tab' | 'claim';
+
+/* 只在 CLI 在执行前拒绝参数、并给出对应命令用法时重试，避免执行两次。 */
+function nodejsSyntaxFromUsage(error: unknown): NodejsSyntax | undefined {
+  if (!(error instanceof TabbitCliError)) return undefined;
+  if (error.code === 'CLI_INVALID_ARGUMENT' &&
+      /^Unknown option or argument "(?:--read-only|--foreground|--claim-tab|--tab)"\./u.test(error.message) &&
+      error.message.includes('Usage: tabbit-cli nodejs ') && error.message.includes('--claim tab:<id>')) return 'claim';
+  if (error.code === CLI_ERROR_CODES.requestFailed &&
+      /^Usage: tabbit-cli .*\bnodejs --task <name> --request-id <id> \[--tab <id>\.\.\. \| --group <id>\]/u.test(error.message)) return 'tab';
+  return undefined;
+}
+
 export class TabbitClient {
   private readonly options: TabbitClientOptions;
   /* 新版 nodejs 不接受 --read-only/--foreground/--claim-tab；首次确认后沿用新版参数。 */
-  private modernNodejsSyntax = false;
+  private nodejsSyntax: NodejsSyntax = 'legacy';
   /* 每个任务名一条 Promise 链，实现按任务串行（见 withTaskLock）。 */
   private readonly taskQueues = new Map<string, Promise<unknown>>();
   /* 当前在飞的 CLI 子进程数（配合 MAX_CONCURRENT_CALLS 限流）。 */
@@ -338,35 +351,33 @@ export class TabbitClient {
     const timeoutMs = Math.min(Math.max(request.timeoutMs ?? EVAL_TIMEOUT_CEILING_MS, EVAL_TIMEOUT_FLOOR_MS), EVAL_TIMEOUT_CEILING_MS);
     const source = buildEvaluationSource(request.code);
     // 先用旧参数；只有 CLI 明确返回新版 nodejs 用法（参数校验在执行前）才重试。
-    // 新版的 --tab 表示本次求值获取已有标签页，不再接受旧版的 --claim-tab。
-    const argv = (modern: boolean): string[] => {
+    // 三代 CLI 的已有页参数依次是 --claim-tab、--tab 和 --claim tab:<id>。
+    const argv = (syntax: NodejsSyntax): string[] => {
       const values = ['nodejs', '--task', request.task, '--request-id', requestId];
-      if (!modern && request.readOnly) values.push('--read-only');
-      if (!modern && request.foreground) values.push('--foreground');
+      if (syntax === 'legacy' && request.readOnly) values.push('--read-only');
+      if (syntax === 'legacy' && request.foreground) values.push('--foreground');
       values.push('--timeout-ms', String(timeoutMs));
-      for (const tab of request.claimTabs ?? []) values.push(modern ? '--tab' : '--claim-tab', String(tab));
+      for (const tab of request.claimTabs ?? []) {
+        if (syntax === 'claim') values.push('--claim', `tab:${tab}`);
+        else values.push(syntax === 'tab' ? '--tab' : '--claim-tab', String(tab));
+      }
       return values;
     };
     let response: Record<string, unknown>;
-    let usedModernSyntax = this.modernNodejsSyntax;
+    let syntax = this.nodejsSyntax;
     try {
-      response = (await this.invoke(argv(usedModernSyntax), source, SUBPROCESS_TIMEOUT_MS, request.signal)) as Record<string, unknown>;
+      response = (await this.invoke(argv(syntax), source, SUBPROCESS_TIMEOUT_MS, request.signal)) as Record<string, unknown>;
     } catch (error) {
-      if (
-        this.modernNodejsSyntax ||
-        !(error instanceof TabbitCliError) ||
-        error.code !== CLI_ERROR_CODES.requestFailed ||
-        !/^Usage: tabbit-cli .*\bnodejs --task <name> --request-id <id> \[--tab <id>\.\.\. \| --group <id>\]/u.test(error.message)
-      ) throw error;
-      this.modernNodejsSyntax = true;
-      usedModernSyntax = true;
-      this.log('nodejs: CLI rejected legacy flags; using current nodejs arguments');
-      response = (await this.invoke(argv(true), source, SUBPROCESS_TIMEOUT_MS, request.signal)) as Record<string, unknown>;
+      const supported = nodejsSyntaxFromUsage(error);
+      if (!supported || supported === syntax) throw error;
+      syntax = supported;
+      this.nodejsSyntax = supported;
+      response = (await this.invoke(argv(syntax), source, SUBPROCESS_TIMEOUT_MS, request.signal)) as Record<string, unknown>;
     }
 
     // 新版成功回执在复用任务时省略 task；调用方仍需要稳定的任务名。
     const task = (response.task ?? { taskId: '', taskName: request.task, reused: true }) as TaskMetadata;
-    if (!usedModernSyntax && (request.claimTabs?.length ?? 0) > 0 && task.reused) {
+    if (syntax === 'legacy' && (request.claimTabs?.length ?? 0) > 0 && task.reused) {
       throw new TabbitCliError({
         kind: 'tab-claim',
         code: 'CLAIM_REQUIRES_NEW_TASK',

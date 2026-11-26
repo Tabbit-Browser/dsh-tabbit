@@ -237,6 +237,33 @@ test('listAllTabs falls back to the CLI tabs command when the unbound op is gone
   }
 })
 
+test('diagnose inventory keeps numeric group IDs and split ownership on Tabbit 1.22', async () => {
+  const tab = tabId => ({ tabId, windowId: 1, index: tabId, title: '测试网页', url: 'https://example.com/' })
+  const group = tabId => ({ groupId: 17, title: '验收组', partial: true, tabs: [tab(tabId)] })
+  const calls = []
+  const service = await startFakeService({ handler(request) {
+    calls.push(request)
+    if (request.op === 'tabs') return { ok: false, error: { code: 'METHOD_NOT_FOUND' } }
+    if (request.argv[0] === 'tabs') return { ok: false, error: { code: 'CLI_INVALID_ARGUMENT', message: 'Unknown command "tabs". Use diagnose to list tabs and groups.' } }
+    return { ok: true, value: {
+      available: { tabs: [tab(1)], groups: [group(2)] },
+      claimed: [{ tabs: [tab(3)], groups: [group(4)] }],
+    } }
+  } })
+  try {
+    await withEndpointFile(endpointJson(service.address), async path => {
+      const { tabs, truncated } = await listAllTabs(path)
+      assert.equal(truncated, false)
+      assert.deepEqual(tabs.map(t => [t.tabId, t.state, t.group?.groupId]), [
+        [1, 'available', undefined], [2, 'available', '17'], [3, 'busy', undefined], [4, 'busy', '17'],
+      ])
+      assert.deepEqual(calls.at(-1), { op: 'cli', argv: ['diagnose'], stdin: '' })
+    })
+  } finally {
+    await service.close()
+  }
+})
+
 test('listAllTabs restarts CLI pagination once on STALE_CURSOR', async () => {
   const fake = cliTabsService([CLI_PAGE_1, CLI_PAGE_2], { staleOnce: true })
   const service = await startFakeService({ handler: fake.handler })

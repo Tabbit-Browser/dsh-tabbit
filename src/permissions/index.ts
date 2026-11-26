@@ -9,11 +9,11 @@
  * 权限，自成一门：
  *
  *  - `tabbit.pageAccess`（总闸，管 tabbit_browser 和 web_fetch 两个工具）：
- *      ask    = 每会话第一次用时问一次用户，之后（成功过就）不再问【默认】
- *      always = 直接放行
+ *      ask    = 每会话第一次用时问一次用户，之后（成功过就）不再问
+ *      always = 直接放行【默认】
  *      never  = 一律拒绝
  *  - `tabbit.intranetFetch`（附加闸，只管 web_fetch 打内网/回环目标）：
- *      ask    = 每会话【每个 origin】问一次【默认】
+ *      ask    = 每会话【每个 origin】问一次
  *      always / never 同上
  *    这道闸就是本插件的 SSRF 姿态——有了它，带用户登录态的浏览器抓取才能
  *    负责任地接管 web_fetch（取代 dsh 内置的直连抓取器，后者靠"只连公网
@@ -124,7 +124,7 @@ export function apply(ctx: Context): void {
     }
 
     // ── 附加闸：web_fetch 的内网目标检查（在总闸之前查，因为它更具体）──
-    if (exec.name === 'web_fetch') {
+    if (exec.name === 'web_fetch' && settings.intranetFetch !== 'always') {
       const url = urlArgumentOf(exec.arguments);
       if (url !== undefined) {
         // 内网判定（net.ts）：返回原因字符串 = 是内网；undefined = 公网/未知。
@@ -159,7 +159,6 @@ export function apply(ctx: Context): void {
               // bypass（Full access）：内网闸放行，继续走下面的总闸检查。
             }
           }
-          // intranetFetch === 'always'：不拦，继续。
         }
       }
     }

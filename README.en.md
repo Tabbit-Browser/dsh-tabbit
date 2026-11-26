@@ -18,7 +18,7 @@ benchmarks.
 | Browser-backed `web_fetch` | Fetches pages through Tabbit with JavaScript rendering and your browser login state. Web search keeps the host’s default routing or your selected search provider. |
 | "Web tabs" `@` mention | Type `@` in the dsh Web UI input box to list pages open in this session's browser tasks **and every tab in the user's browser** — pick one to add as context (contentless tab-group home pages are filtered out). |
 | "Tab groups" `@` mention | Shown as its own section in the `@` menu: find a whole tab group by name (or by any member page's title/URL). A group mention is a lightweight *reference* — the chip carries the member list and sending stays instant; the model pulls the pages it needs with `tabbit_browser`/`web_fetch` during the conversation (visible, permission-gated) instead of blocking the send on a full-group re-fetch. |
-| Dedicated "page access" permission | Full permission controls. Because dsh shares the user's cookies when it reaches Tabbit pages, it confirms `pageAccess` (asked once per session by default) and `intranetFetch` (per-request approval when `web_fetch` targets an intranet address). |
+| Dedicated "page access" permission | Page access with browser cookies and intranet fetches are allowed by default. Set `pageAccess` or `intranetFetch` to `ask` or `never` to restrict either. |
 | `tabbit_browser_install` tool | Environment preflight: detects an installed stable Tabbit build and verifies the launcher and Runtime Service; downloads Tabbit as a dsh background job when it's missing or outdated. |
 | `tabbit_plugin_update` tool | Plugin update check: asks npm for the latest release at most once a day, and silently installs a suitable version in the background. |
 | `tabbit` skill | Teaches the model best practices for using Tabbit. Defaults to Tabbit's own official skill at `~/.agents/skills/tabbit/` (it evolves with the browser runtime); this plugin bundles a fallback copy. |
@@ -65,8 +65,8 @@ DSH 0.2+: edit `tabbit-browser` in plugin settings, or add this to the profile's
   config:
     instance: ""          # explicit 16-hex instance id; usually empty
     launcherPath: ""      # empty = discover tabbit-cli automatically
-    pageAccess: ask       # ask (once per session) | always | never
-    intranetFetch: ask    # intranet web_fetch: ask (once per session+origin) | always | never
+    pageAccess: always       # ask (once per session) | always | never
+    intranetFetch: always    # intranet web_fetch: ask (once per session+origin) | always | never
 ```
 
 On DSH 0.1.x, put the four fields under `tabbit:` in `$DSH_HOME/settings.yaml`. The plugin migrates those values on upgrade to 0.2; existing new settings take precedence.
@@ -103,8 +103,8 @@ gets denied — that combination gets a denial message pointing at the
 
 - Because the agent shares the user's real login state, `pageAccess` is a
   dedicated permission independent of filesystem/sandbox permissions, and
-  asks for user confirmation by default.
-- Authorization is remembered: once a tool call succeeds, this session won't
+  allows access by default.
+- With `ask`, authorization is remembered: once a tool call succeeds, this session won't
   ask again; failures aren't recorded (a retry after failure asks again).
 
 ## Development

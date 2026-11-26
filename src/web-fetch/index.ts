@@ -15,7 +15,7 @@
  * 本文件的做法：
  *  - 用【用户的真实 Tabbit 浏览器】取页（顺带白赚 JS 渲染和登录墙内容）；
  *  - 安全性与 permissions 模块的双闸配对：pageAccess 总闸 + intranetFetch
- *    内网附加闸（默认逐 origin 审批）——这是"敢启用 fetch"的全部底气；
+ *    内网附加闸（设为 ask 时，每会话逐 origin 询问）；
  *  - 请求前的内网判定在 permissions 里做；本文件负责【事后半段】：拿到
  *    最终 URL（重定向后的落点）再查一次，公网请求跳到内网目标一律拒绝
  *    返回内容（redirect containment，防"公网 URL 302 进内网"绕闸）。

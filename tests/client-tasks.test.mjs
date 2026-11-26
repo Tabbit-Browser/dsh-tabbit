@@ -54,6 +54,9 @@ switch (argv[0]) {
     break;
   }
   case 'nodejs': {
+    if (generation === 'diagnose-cli' && argv.includes('--read-only')) {
+      fail('Unknown option or argument "--read-only". Accepted options: --claim.\\nUsage: tabbit-cli nodejs --task <name> [--claim tab:<id>|group:<id>]...', 'CLI_INVALID_ARGUMENT');
+    }
     if (generation.startsWith('modern') && argv.some(value => ['--read-only', '--foreground', '--claim-tab'].includes(value))) {
       fail('Usage: tabbit-cli finish --task <name> [--discard] | nodejs --task <name> --request-id <id> [--tab <id>... | --group <id>] [--timeout-ms <ms>]', 'REQUEST_FAILED');
     }
@@ -188,6 +191,17 @@ test('modern nodejs --tab works when an existing task is reused', async () => {
     assert.equal(outcome.status, 'succeeded')
     assert.equal(outcome.result.value, 42)
     assert.deepEqual((await fixture.calls()).at(-1).slice(-2), ['--tab', '17'])
+  })
+})
+
+test('Tabbit 1.22 retries read-only extraction with supported options and keeps the request ID', async () => {
+  await withFakeLauncher('diagnose-cli', async (client, fixture) => {
+    const outcome = await client.evaluate({ task: 'mention', code: 'return 42', readOnly: true, claimTabs: [17] })
+    assert.equal(outcome.result.value, 42)
+    const [legacy, current] = await fixture.calls()
+    assert.equal(current.includes('--read-only'), false)
+    assert.deepEqual(current.slice(-2), ['--claim', 'tab:17'])
+    assert.equal(legacy[legacy.indexOf('--request-id') + 1], current[current.indexOf('--request-id') + 1])
   })
 })
 

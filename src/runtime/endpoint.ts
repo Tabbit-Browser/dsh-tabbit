@@ -18,10 +18,11 @@
  * 后续（2026-09-01 浏览器提交 556476dd92b，1.13.20 起）persistent/bound 整套
  * 连接模式被删，unbound `tabs` 一并消失（dispatch 只剩 `cli` 与 `ping`），
  * 同一批次还删掉了 `tasks` CLI 子命令（client.ts 的 listTasks 另有适配）。
- * 于是清单读取分两代（见 listAllTabs）：
+ * 清单读取随浏览器版本演进（见 listAllTabs）：
  *   - 旧代（1.11.16 ～ 1.13.8）：{"op":"tabs"} 直取；
- *   - 新代（1.13.20+）：{"op":"tabs"} 回 METHOD_NOT_FOUND，改在同一条 socket
+ *   - 中间版本（1.13.20 起）：{"op":"tabs"} 回 METHOD_NOT_FOUND，改在同一条 socket
  *     上发 {"op":"cli", argv:["tabs", ...]}——仍然不经 launcher、不拉起浏览器。
+ *   - 1.22 的 CLI 移除了 tabs，改用 diagnose 的 available / claimed 清单。
  *
  * ─── 线上协议（对 1.11.16 / 1.13.8 / 1.13.24 三版源码核对，并经真机验证；
  *      服务端实现 runtime-public-server.mjs + runtime-service.mjs）───
@@ -220,8 +221,9 @@ function endpointRequestOnce(endpoint: TabbitEndpoint, payload: object, timeoutM
           `${JSON.stringify(payload)}\n`,
       );
     });
-    socket.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString('utf8');
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk: string) => {
+      buffer += chunk;
       const newline = buffer.indexOf('\n');
       if (newline < 0) return;
       settle(() => {
@@ -306,7 +308,15 @@ export async function listAllTabs(endpointPath: string, options?: EndpointReques
     value = await requestViaEndpoint(endpointPath, { op: 'tabs' }, options);
   } catch (error) {
     if (!(error instanceof TabbitCliError) || error.code !== CLI_ERROR_CODES.methodNotFound) throw error;
-    return await listAllTabsViaCli(endpointPath, options);
+    try {
+      return await listAllTabsViaCli(endpointPath, options);
+    } catch (cliError) {
+      // 1.22 的 CLI 合并了清单命令；只有明确不支持 tabs 时才切换协议。
+      if (!(cliError instanceof TabbitCliError) || cliError.code !== 'CLI_INVALID_ARGUMENT' ||
+          !cliError.message.startsWith('Unknown command "tabs"')) throw cliError;
+      const snapshot = await requestViaEndpoint(endpointPath, { op: 'cli', argv: ['diagnose'], stdin: '' }, options);
+      return normalizeDiagnosis(snapshot);
+    }
   }
   const page = normalizeInventoryPage(value);
   return { tabs: page.tabs, truncated: page.truncated };
@@ -351,6 +361,34 @@ async function listAllTabsViaCliOnce(endpointPath: string, options?: EndpointReq
     cursor = inventory.nextCursor;
   }
   return { tabs, truncated: true };
+}
+
+/* diagnose 把散页、分组页和每个任务已占用的页分别列出。还原为插件共用的清单。 */
+function normalizeDiagnosis(value: unknown): TabbitTabInventory {
+  type Bucket = { tabs: unknown[]; groups: { groupId: number | string; title: string; tabs: unknown[] }[] };
+  const snapshot = value as { available?: Bucket; claimed?: Bucket[]; error?: { code?: string; message?: string } } | null;
+  if (!snapshot?.available || !Array.isArray(snapshot.claimed)) {
+    throw new TabbitCliError({
+      kind: 'protocol',
+      code: snapshot?.error?.code ?? 'BAD_FRAME',
+      message: snapshot?.error?.message ?? 'Runtime Service diagnose inventory is unavailable',
+    });
+  }
+  const tabs: TabbitTabDescriptor[] = [];
+  function append(bucket: Bucket, state: 'available' | 'busy'): void {
+    // 分组可能跨越两个所有权区段；成员保留原组 ID，各自沿用区段的占用状态。
+    const add = (members: unknown[], group: TabbitTabDescriptor['group']) => {
+      const page = normalizeInventoryPage({ tabs: members });
+      for (const tab of page.tabs) tabs.push({ ...tab, state, group });
+    };
+    add(bucket.tabs, null);
+    for (const group of bucket.groups) {
+      add(group.tabs, { groupId: String(group.groupId), title: group.title });
+    }
+  }
+  append(snapshot.available, 'available');
+  for (const bucket of snapshot.claimed) append(bucket, 'busy');
+  return { tabs, truncated: false };
 }
 
 /*

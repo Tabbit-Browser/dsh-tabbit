@@ -9,7 +9,7 @@
  * 服务）这类地址，等于把用户内网暴露给了提示词注入攻击。dsh 官方出厂就是因为
  * 没有 provider 能负责任地处理这个问题，才把 web_fetch 整个禁用的。
  * 本插件的方案：抓内网目标不禁止，但走独立的审批门（settings
- * `tabbit.intranetFetch`，默认逐 origin 询问用户）——判定"是不是内网目标"
+ * `tabbit.intranetFetch`，可配置为逐 origin 询问用户）——判定"是不是内网目标"
  * 就是本文件的活。
  *
  * 设计取向：尽力而为（best-effort），三层判定由快到慢：

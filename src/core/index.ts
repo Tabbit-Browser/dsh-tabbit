@@ -96,16 +96,16 @@ export interface TabbitSettings {
 export const SETTINGS_SCHEMA: z<TabbitSettings> = z.object({
   instance: z.string().default(''),
   launcherPath: z.string().default(''),
-  pageAccess: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('ask'),
-  intranetFetch: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('ask'),
+  pageAccess: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always'),
+  intranetFetch: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always'),
 });
 
 /* 新版只把 volatile 字段投影到设置页；旧版仍从 SETTINGS_SCHEMA 读用户设置。 */
 export const Config = z.object({
   instance: z.string().default('').volatile(),
   launcherPath: z.string().default('').volatile(),
-  pageAccess: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('ask').volatile(),
-  intranetFetch: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('ask').volatile(),
+  pageAccess: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always').volatile(),
+  intranetFetch: z.union([z.const('ask'), z.const('always'), z.const('never')] as const).default('always').volatile(),
 });
 
 interface LiveValue<T> { get(): T }
