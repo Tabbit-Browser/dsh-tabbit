@@ -89,23 +89,18 @@ Priority order when this machine has more than one Tabbit build installed:
    error listing the candidates otherwise — on Windows, when the registry
    isn't readable, the native CLI picks for itself).
 
-**Full access note**: dsh's `danger-full-access` permission preset writes the
-session's approval policy as `never` (dsh's definition: auto-deny every ask).
-This plugin's permission gate detects that override and **auto-allows**
-instead of issuing an ask that's guaranteed to be denied — full access means
-full access (bash is already unrestricted in that mode, so gating only the
-browser tool has no defensive value). Exception: a deployment-level default
-of `never` (not a session override) isn't visible to the public API and still
-gets denied — that combination gets a denial message pointing at the
-`tabbit.pageAccess: always` escape hatch.
+Tabbit skips `ask` confirmations when DSH reports Full access
+(`danger-full-access`) as the active preset. Explicit denials still apply.
+DSH handles approval in Auto and custom presets. Deployments without an
+approval channel can explicitly select `always`.
 
 ## Permissions & Security
 
 - Because the agent shares the user's real login state, `pageAccess` is a
   dedicated permission independent of filesystem/sandbox permissions, and
   allows access by default.
-- With `ask`, authorization is remembered: once a tool call succeeds, this session won't
-  ask again; failures aren't recorded (a retry after failure asks again).
+- With `ask`, the session remembers an authorization after the user approves
+  it and the tool call succeeds.
 
 ## Development
 

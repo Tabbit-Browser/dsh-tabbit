@@ -65,7 +65,7 @@ import { listAllTabs, type TabbitTabInventory } from '../runtime/endpoint.js';
 import { TabbitCliError } from '../runtime/errors.js';
 import { defaultLauncherPath, listInstances, type TabbitInstance } from '../runtime/instances.js';
 import { checkPluginUpdate, prependUpdateNotice } from '../update-check.js';
-import { migrateLegacySettings } from './legacy-settings.js';
+import { legacyDefaults, loadLegacySettings, migrateLegacySettings } from './legacy-settings.js';
 
 // 下面这些 `import type {}` 是 TypeScript 的"类型副作用导入"：不引入任何
 // 运行时代码，只为了让这些包对 Context 接口的类型扩充（declare module）生效，
@@ -724,8 +724,24 @@ export function apply(ctx: Context, config: CurrentConfig): void {
     register?: (name: string, schema: z<TabbitSettings>) => { get(): TabbitSettings };
   };
   const legacyScope = settings.register?.('tabbit', SETTINGS_SCHEMA);
+  let pendingSettings: ReturnType<typeof loadLegacySettings>;
+  let unreadableLegacySettings = false;
+  if (legacyScope === undefined) {
+    try {
+      pendingSettings = loadLegacySettings(ctx);
+    } catch (error) {
+      unreadableLegacySettings = true;
+      ctx.logger.warn(`dsh-tabbit: legacy settings could not be read (${error instanceof Error ? error.name : 'unknown error'})`);
+    }
+  }
   const service = new TabbitService(
-    () => legacyScope?.get() ?? readConfig(config),
+    () => {
+      if (legacyScope !== undefined) return legacyScope.get();
+      const live = readConfig(config);
+      // 迁移落盘前按旧值补齐；读取异常时，未知的旧权限不能用新装默认值放行。
+      const legacy = unreadableLegacySettings ? { pageAccess: 'never', intranetFetch: 'never' } as const : pendingSettings?.values;
+      return legacy === undefined ? live : { ...live, ...legacyDefaults(ctx, legacy, live) };
+    },
     // 把 dsh 日志器接给服务与底层客户端：finish 吞错/清理失败/隔离恢复这些
     // 原本静默的路径由此在 dsh 日志里可见（排查实例漂移导致标签组残留的关键痕迹）。
     (message) => ctx.logger.info(`dsh-tabbit: ${message}`),
@@ -735,8 +751,10 @@ export function apply(ctx: Context, config: CurrentConfig): void {
 
   // DSH 0.2 会把旧 settings.yaml 改名为 .imported，但无法把 tabbit 节自动映射
   // 到本包的 tabbit-browser 行。迁移只在新版运行，且不阻塞服务启动。
-  if (legacyScope === undefined) {
-    void migrateLegacySettings(ctx).catch((error: unknown) => {
+  if (pendingSettings !== undefined) {
+    void migrateLegacySettings(ctx, pendingSettings).then((migrated) => {
+      if (migrated) pendingSettings = undefined;
+    }).catch((error: unknown) => {
       ctx.logger.warn(`dsh-tabbit: legacy settings migration failed: ${String((error as Error)?.message ?? error)}`);
     });
   }

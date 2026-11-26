@@ -652,32 +652,23 @@ test('tabbit_browser claim_tabs on a task already in this session claims via the
   assert.equal(evaluateCalls[0].claimTabs, undefined)
 })
 
-test('tabbit_browser claim_tabs failure on an existing task is a soft error; evaluation still runs', async () => {
+test('tabbit_browser stops before evaluating when an existing task cannot claim the requested tabs', async () => {
   const tool = toolCtx({
     sessionTasks: () => ['existing-task'],
-    rememberSessionTask: () => {},
     client: () => ({
       claimTabs: async () => {
         throw new TabbitCliError({ kind: 'tab-claim', code: 'TAB_OWNERSHIP_CONFLICT', message: 'tab 17 is owned by another task' })
       },
-      evaluate: async () => ({
-        status: 'succeeded',
-        result: { value: 'ok' },
-        task: { taskId: 't1', taskName: 'existing-task', reused: true },
-        taskWasReset: false,
-        notes: [],
-      }),
-      resolvedInstanceId: () => 'INSTANCE1',
+      evaluate: async () => assert.fail('the requested tab was not claimed'),
     }),
   })
   const value = await tool.execute(
     { task: 'existing-task', code: 'return 1;', claim_tabs: [17] },
     { agent: { id: 's1' } },
   )
-  assert.equal(value.status, 'succeeded')
-  assert.equal(value.value, 'ok')
+  assert.equal(value.status, 'failed')
+  assert.equal(value.errorCode, 'TAB_OWNERSHIP_CONFLICT')
   assert.equal(value.claimError, 'tab 17 is owned by another task')
-  assert.equal(value.claimedTabCount, undefined)
 })
 
 test('tabbit_browser claim_tabs on a brand-new task keeps the existing creation-time path unchanged', async () => {

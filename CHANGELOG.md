@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- New installs allow browser access and intranet `web_fetch` by default. Explicit permission settings still apply, including during migration from older DSH profiles.
+- Restored `@` suggestions for open pages and tab groups on Tabbit 1.22. Page mentions and browser fetches retain large UTF-8 results.
+- `web_search` follows DSH's model routing or your chosen search provider. Tabbit remains the default fetch provider.
+- Fixed hot reloading of the mentions plugin and updated compatibility for DSH 0.2.3 and Cordis 4.2 prereleases.
+- Fixed attaching more tabs to an existing browser task and finishing it with the tabs kept open. Approval records stay scoped to the session and require an approved, successful call.
+
 ## 0.4.1
 
 - Fixed installer background jobs on DSH 0.1.7+ while retaining Agent ownership on older hosts.

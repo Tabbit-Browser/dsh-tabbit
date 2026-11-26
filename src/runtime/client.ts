@@ -48,6 +48,9 @@
  *                                            resource 分块读回再解信封
  */
 import { randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open, realpath } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 import { runCli } from './cli.js';
 import { buildEvaluationSource, decodeEnvelope, type DecodedResult } from './codec.js';
@@ -146,13 +149,15 @@ const MAX_CONCURRENT_CALLS = 4;
  * 「回执」（receipt）：Runtime Service 对每个请求的状态记录。
  * status 流转：queued（排队）→ running（执行中）→ 终态之一
  * （succeeded / failed / interrupted）。
- * result 两种形态：inline（≤8KiB，值直接在里面）或 resource（溢出成
- * 资源文件，只给 resourceId 和字节数，需另行分块读回）。
+ * result 可以内联，也可以用旧版 resource ID 或新版任务产物文件承载长结果。
  */
 interface Receipt {
   requestId: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted';
-  result?: { type: 'inline'; value: unknown } | { type: 'resource'; resourceId: string; byteLength: number };
+  result?:
+    | { type: 'inline'; value: unknown }
+    | { type: 'resource'; resourceId: string; byteLength: number }
+    | { type: 'file'; path: string; byteLength: number };
   error?: unknown;
   [key: string]: unknown;
 }
@@ -168,6 +173,14 @@ function nodejsSyntaxFromUsage(error: unknown): NodejsSyntax | undefined {
   if (error.code === CLI_ERROR_CODES.requestFailed &&
       /^Usage: tabbit-cli .*\bnodejs --task <name> --request-id <id> \[--tab <id>\.\.\. \| --group <id>\]/u.test(error.message)) return 'tab';
   return undefined;
+}
+
+/* 只有确认该 CLI 的裸 finish 会保留标签页，才移除旧版必需的 --keep。 */
+function canRetryKeep(error: TabbitCliError): boolean {
+  const usage = /(?:^|\n)Usage: tabbit-cli finish --task <name> \[--discard\](?:\s*\||\s*$)/mu;
+  if (!usage.test(error.message)) return false;
+  return error.code === CLI_ERROR_CODES.requestFailed ||
+    (error.code === 'CLI_INVALID_ARGUMENT' && error.message.startsWith('Unknown option or argument "--keep".'));
 }
 
 export class TabbitClient {
@@ -195,7 +208,7 @@ export class TabbitClient {
 
   /* 每次调用时实时解析实例（配置的 id 校验一遍；没配就自动选）。可能抛引导错误。 */
   private instance(): string | undefined {
-    const instances = listInstances();
+    const instances = this.listInstances();
     // Windows：实例注册表目录在 Windows 上的位置未经真机确认（本地解析很可能
     // 读到空列表），此时不要在客户端这层拦死——把选择（连同可能配置的 id）
     // 原样委托给原生 tabbit-cli.exe，它自有实例选择与可解码的报错
@@ -264,12 +277,12 @@ export class TabbitClient {
   }
 
   /* 所有 CLI 调用的统一入口：先占并发坑，再执行，finally 保证释放。 */
-  private async invoke(argv: string[], stdin: string, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
+  private async invoke(argv: string[], stdin: string, timeoutMs: number, signal?: AbortSignal, instanceId?: string): Promise<unknown> {
     const release = await this.acquireSlot();
     try {
       return await runCli(argv, stdin, {
         launcherPath: this.launcher(),
-        instanceId: this.instance(),
+        instanceId: instanceId ?? this.instance(),
         timeoutMs,
         ...(signal ? { signal } : {}),
       });
@@ -350,6 +363,8 @@ export class TabbitClient {
     // 超时钳位到 [60000, 120000]（两代服务端接受范围的交集，见常量注释）。
     const timeoutMs = Math.min(Math.max(request.timeoutMs ?? EVAL_TIMEOUT_CEILING_MS, EVAL_TIMEOUT_FLOOR_MS), EVAL_TIMEOUT_CEILING_MS);
     const source = buildEvaluationSource(request.code);
+    // 同一次求值、轮询和产物读取都使用同一个实例，防止用户在过程中切换浏览器。
+    const instanceId = this.resolvedInstanceId();
     // 先用旧参数；只有 CLI 明确返回新版 nodejs 用法（参数校验在执行前）才重试。
     // 三代 CLI 的已有页参数依次是 --claim-tab、--tab 和 --claim tab:<id>。
     const argv = (syntax: NodejsSyntax): string[] => {
@@ -366,13 +381,13 @@ export class TabbitClient {
     let response: Record<string, unknown>;
     let syntax = this.nodejsSyntax;
     try {
-      response = (await this.invoke(argv(syntax), source, SUBPROCESS_TIMEOUT_MS, request.signal)) as Record<string, unknown>;
+      response = (await this.invoke(argv(syntax), source, SUBPROCESS_TIMEOUT_MS, request.signal, instanceId)) as Record<string, unknown>;
     } catch (error) {
       const supported = nodejsSyntaxFromUsage(error);
       if (!supported || supported === syntax) throw error;
       syntax = supported;
       this.nodejsSyntax = supported;
-      response = (await this.invoke(argv(syntax), source, SUBPROCESS_TIMEOUT_MS, request.signal)) as Record<string, unknown>;
+      response = (await this.invoke(argv(syntax), source, SUBPROCESS_TIMEOUT_MS, request.signal, instanceId)) as Record<string, unknown>;
     }
 
     // 新版成功回执在复用任务时省略 task；调用方仍需要稳定的任务名。
@@ -390,14 +405,14 @@ export class TabbitClient {
     //    requestId/status/result（result 有 type 判别）；
     //  - 新版（Tabbit 1.11+/Cr151）：顶层就是一张【扁平终态回执】
     //    { status, result, task, transition }——result 无 type 字段（inline
-    //    有 value、溢出有 resourceId+byteLength），失败时错误在 result.error。
-    // 注意 `receipt` 子命令两代都返回旧版包裹形（回执存储没变），所以只需
-    // 在这里归一化，轮询路径照旧。
+    //    有 value、溢出有 resourceId 或 path），失败时错误在 result.error。
     let receipt = response.receipt !== undefined ? (response.receipt as Receipt) : normalizeFlatReceipt(response, requestId);
-    receipt = await this.waitForTerminalReceipt(request.task, receipt);
+    receipt = await this.waitForTerminalReceipt(request.task, receipt, instanceId);
 
     if (receipt.status === 'succeeded') {
-      const result = await this.decodeReceiptResult(request.task, receipt, request.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES, notes);
+      const result = await this.decodeReceiptResult(
+        request.task, task.taskId, receipt, request.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES, notes, instanceId,
+      );
       return { status: 'succeeded', result, task, taskWasReset, notes };
     }
     const errorMessage = extractReceiptError(receipt);
@@ -410,11 +425,15 @@ export class TabbitClient {
    * 用 `receipt` 命令查一次，最多 20 次（40 秒）；到头了就把非终态回执
    * 原样返回，让上层把它当失败处理。
    */
-  private async waitForTerminalReceipt(task: string, receipt: Receipt): Promise<Receipt> {
+  private async waitForTerminalReceipt(task: string, receipt: Receipt, instanceId: string | undefined): Promise<Receipt> {
     let current = receipt;
     for (let poll = 0; poll < 20 && (current.status === 'queued' || current.status === 'running'); poll += 1) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      current = (await this.invoke(['receipt', '--task', task, '--request', current.requestId], '', CONTROL_TIMEOUT_MS)) as Receipt;
+      // 1.22 仍接受旧版 --request；归一化内联、资源 ID 和文件形式的终态回执。
+      const reply = await this.invoke(
+        ['receipt', '--task', task, '--request', current.requestId], '', CONTROL_TIMEOUT_MS, undefined, instanceId,
+      ) as Record<string, unknown>;
+      current = (reply.receipt as Receipt | undefined) ?? normalizeFlatReceipt(reply, current.requestId);
     }
     return current;
   }
@@ -432,16 +451,20 @@ export class TabbitClient {
    *        解码能救回前缀部分），并在 notes 里提醒模型返回值太大了。
    */
   private async decodeReceiptResult(
-    task: string,
+    taskName: string,
+    taskId: string,
     receipt: Receipt,
     maxResultBytes: number,
     notes: string[],
+    instanceId: string | undefined,
   ): Promise<DecodedResult> {
     const result = receipt.result;
     if (!result) return { value: null, truncated: false };
     if (result.type === 'inline') return decodeEnvelope(result.value);
 
-    const { text, complete } = await this.readResourceText(task, result.resourceId, maxResultBytes);
+    const { text, complete } = result.type === 'file'
+      ? await this.readResultFile(result.path, taskId, instanceId, maxResultBytes)
+      : await this.readResourceText(taskName, result.resourceId, maxResultBytes, instanceId);
     if (!complete) {
       notes.push(
         `Result was ${result.byteLength} bytes; only the first ${maxResultBytes} bytes were read back. Return smaller values (or write files via artifactPath) for complete results.`,
@@ -459,6 +482,47 @@ export class TabbitClient {
     return decodeEnvelope(stripped, false);
   }
 
+  /* 1.22 的路径来自 CLI 回执，只读取所选实例中 Runtime 自己生成的结果文件。 */
+  private async readResultFile(
+    path: string, taskId: string, instanceId: string | undefined, maxBytes: number,
+  ): Promise<{ text: string; complete: boolean }> {
+    const instance = this.listInstances().find((entry) => entry.id === instanceId);
+    try {
+      if (!instance || !isAbsolute(path)) throw new Error('missing runtime path');
+      const root = join(dirname(instance.endpointPath), 'Runtime', 'artifacts');
+      const [taskDir, file, ...extra] = relative(root, path).split(sep);
+      if (extra.length || !/^task-[a-f0-9-]{36}$/u.test(taskDir) ||
+          !/^result-[a-f0-9-]{36}\.json$/u.test(file ?? '') || (taskId && taskId !== taskDir)) {
+        throw new Error('unexpected result path');
+      }
+      const canonicalState = await realpath(dirname(instance.endpointPath));
+      const allowedPath = join(canonicalState, 'Runtime', 'artifacts', taskDir, file);
+      if (await realpath(path) !== allowedPath) throw new Error('redirected result path');
+      const handle = await open(allowedPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+      try {
+        const stats = await handle.stat();
+        if (!stats.isFile()) throw new Error('unexpected result type');
+        const limit = Number.isSafeInteger(maxBytes) && maxBytes > 0 ? maxBytes : DEFAULT_MAX_RESULT_BYTES;
+        const size = Math.min(stats.size, limit);
+        const buffer = Buffer.alloc(size);
+        let offset = 0;
+        while (offset < size) {
+          const { bytesRead } = await handle.read(buffer, offset, size - offset, offset);
+          if (bytesRead === 0) break;
+          offset += bytesRead;
+        }
+        return { text: buffer.toString('utf8', 0, offset), complete: offset === stats.size };
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      throw new TabbitCliError({
+        kind: 'protocol', code: 'BAD_RESULT_FILE',
+        message: 'Tabbit CLI returned a result file that could not be read from the selected browser task.',
+      });
+    }
+  }
+
   /*
    * 用 `resource` 命令分块读回一个溢出资源。
    * 协议：每次带 --offset 请求，返回 {data: 本块文本, nextOffset, eof}；
@@ -466,14 +530,16 @@ export class TabbitClient {
    * 中间那个防御分支：万一服务端返回畸形块（没有 nextOffset 或空 data），
    * 宁可当"没读完"返回也绝不无限自旋。
    */
-  async readResourceText(task: string, resourceId: string, maxBytes: number): Promise<{ text: string; complete: boolean }> {
+  async readResourceText(
+    task: string, resourceId: string, maxBytes: number, instanceId = this.resolvedInstanceId(),
+  ): Promise<{ text: string; complete: boolean }> {
     let offset = 0;
     let text = '';
     for (;;) {
       const chunk = (await this.invoke(
         ['resource', '--task', task, '--resource', resourceId, '--offset', String(offset)],
         '',
-        CONTROL_TIMEOUT_MS,
+        CONTROL_TIMEOUT_MS, undefined, instanceId,
       )) as { data: string; nextOffset: number; eof: boolean };
       text += chunk.data;
       if (chunk.eof) return { text, complete: true };
@@ -511,26 +577,26 @@ export class TabbitClient {
    */
   async finishTask(task: string, options: { keep?: boolean } = {}): Promise<void> {
     const argv = ['finish', '--task', task, options.keep ? '--keep' : '--discard'];
+    const instanceId = this.resolvedInstanceId();
     try {
       try {
-        await this.invoke(argv, '', CONTROL_TIMEOUT_MS);
+        await this.invoke(argv, '', CONTROL_TIMEOUT_MS, undefined, instanceId);
       } catch (error) {
         // 只认新版 finish 的确切用法签名，不按浏览器版本猜测，也不把超时、
         // 执行失败或仍列 --keep 的旧版用法当作可重试信号。
         if (
           !options.keep ||
           !(error instanceof TabbitCliError) ||
-          error.code !== CLI_ERROR_CODES.requestFailed ||
-          !/^Usage: tabbit-cli finish --task <name> \[--discard\](?:\s*\||\s*$)/u.test(error.message)
+          !canRetryKeep(error)
         ) {
           throw error;
         }
         this.log(`finish --task "${task}": CLI rejected --keep; retrying with keep-by-default finish`);
         // 重试失败仍走外层的幂等清理规则；其余错误照常交给调用方。
-        await this.invoke(['finish', '--task', task], '', CONTROL_TIMEOUT_MS);
+        await this.invoke(['finish', '--task', task], '', CONTROL_TIMEOUT_MS, undefined, instanceId);
       }
     } catch (error) {
-      const instance = this.resolvedInstanceId() ?? 'unresolved';
+      const instance = instanceId ?? 'unresolved';
       if (isUnknownTaskError(error)) {
         this.log(
           `finish --task "${task}" ignored: unknown task on instance ${instance} (already gone there; if its tab group is still visible, the task may live on a DIFFERENT instance)`,
@@ -561,12 +627,25 @@ export class TabbitClient {
    * 调用方不需要处理"部分成功"的中间态。
    */
   async claimTabs(task: string, tabIds: number[]): Promise<{ groupId?: string; ownedPageCount?: number }> {
-    const argv = ['claim', '--task', task];
-    for (const tab of tabIds) argv.push('--tab', String(tab));
-    const response = (await this.invoke(argv, '', CONTROL_TIMEOUT_MS)) as { groupId?: unknown; ownedPageCount?: unknown };
+    const argv = (flag: '--tab' | '--claim') => [
+      'claim', '--task', task,
+      ...tabIds.flatMap((id) => [flag, flag === '--claim' ? `tab:${id}` : String(id)]),
+    ];
+    const instanceId = this.resolvedInstanceId();
+    let response: unknown;
+    try {
+      response = await this.invoke(argv('--tab'), '', CONTROL_TIMEOUT_MS, undefined, instanceId);
+    } catch (error) {
+      // 参数在执行前被拒绝，才改用 1.22 的认领参数重试。
+      if (!(error instanceof TabbitCliError) || error.code !== 'CLI_INVALID_ARGUMENT' ||
+          !error.message.startsWith('Unknown option or argument "--tab".') ||
+          !error.message.includes('Usage: tabbit-cli claim --task <name> --claim tab:<id>')) throw error;
+      response = await this.invoke(argv('--claim'), '', CONTROL_TIMEOUT_MS, undefined, instanceId);
+    }
+    const result = response as { groupId?: unknown; ownedPageCount?: unknown };
     return {
-      ...(typeof response.groupId === 'string' ? { groupId: response.groupId } : {}),
-      ...(typeof response.ownedPageCount === 'number' ? { ownedPageCount: response.ownedPageCount } : {}),
+      ...(typeof result.groupId === 'string' || typeof result.groupId === 'number' ? { groupId: String(result.groupId) } : {}),
+      ...(typeof result.ownedPageCount === 'number' ? { ownedPageCount: result.ownedPageCount } : {}),
     };
   }
 
@@ -597,16 +676,18 @@ export class TabbitClient {
  */
 function normalizeFlatReceipt(raw: Record<string, unknown>, fallbackRequestId: string): Receipt {
   const result = raw.result as
-    | { value?: unknown; resourceId?: unknown; byteLength?: unknown; error?: unknown; requestId?: unknown }
+    | { value?: unknown; resourceId?: unknown; path?: unknown; byteLength?: unknown; error?: unknown; requestId?: unknown }
     | undefined;
   const normalizedResult =
     result === undefined
       ? undefined
       : result.resourceId !== undefined
         ? { type: 'resource' as const, resourceId: String(result.resourceId), byteLength: Number(result.byteLength ?? 0) }
-        : 'value' in result
-          ? { type: 'inline' as const, value: result.value }
-          : undefined;
+        : typeof result.path === 'string'
+          ? { type: 'file' as const, path: result.path, byteLength: Number(result.byteLength ?? 0) }
+          : 'value' in result
+            ? { type: 'inline' as const, value: result.value }
+            : undefined;
   const requestId =
     typeof raw.requestId === 'string' ? raw.requestId : typeof result?.requestId === 'string' ? result.requestId : fallbackRequestId;
   const error = raw.error ?? result?.error;

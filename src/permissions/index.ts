@@ -36,17 +36,8 @@
  * 工具执行完（无论成败）会触发 `tools/result` 事件——我们用它来"记账"：
  * 只有【成功】的调用才把授权记进会话记忆（失败不记，下次重试会再问）。
  *
- * ─── Full access（danger-full-access）联动，一个反直觉的坑 ────────────────
- *
- * dsh 的 `danger-full-access` 权限预设会给会话写一个审批策略覆盖 `never`，
- * 而 dsh 把 `never` 定义为【自动拒绝所有 ask】（不是"从不打扰、默认允许"！）。
- * 如果我们不管这事，"最宽松"的 Full access 模式反而成了唯一一个浏览器访问
- * 必然失败的模式。所以本门检测到会话的策略覆盖是 never 时【直接放行】：
- * Full access 的契约本来就是"没有任何门"，那个模式下 bash 都不受限，
- * 单单拦浏览器工具属于安全剧场（security theater），没有防御价值。
- * 注意边界：这招只对【会话级覆盖】有效；部署级把审批默认配成 never（写在
- * 配置里而非会话覆盖）时，公开审批 API 读不到，ask 仍会被自动拒——那种部署
- * 应配 `tabbit.pageAccess: always`。
+ * Full access 的豁免以 DSH 当前生效的预设为准。Auto 和自定义预设也可采用
+ * `never` 审批策略，单独看这个值无法知道用户是否选择了 Full access。
  */
 import type { Context } from '@deepseek-ai/cordis';
 
@@ -66,8 +57,7 @@ type AskOutcome = 'bypass' | { kind: 'deny'; reason: string } | { kind: 'ask'; r
 
 /*
  * 把"想发起一次询问"折算成当前模式下的正确结论：
- *  - 会话审批策略覆盖为 `never`（= Full access 模式）→ 'bypass' 放行
- *    （理由见文件头：ask 注定被自动拒，发出去只会造成误伤）；
+ *  - 宿主确认当前预设为 Full access → 'bypass' 放行；
  *  - 审批服务根本没挂载（某些 headless 组合）→ 返回一个【解释了出路】的
  *    拒绝：告诉用户去 settings 把 tabbit.<key> 设为 always。若不接手，
  *    dsh 工具层的通用拒绝文案会把这条出路藏没；
@@ -79,19 +69,15 @@ function resolveAsk(
   askReason: string,
   settingsKey: 'pageAccess' | 'intranetFetch',
 ): AskOutcome {
-  // ctx.get('approval')：按名取服务的"软"方式——不在 inject 里声明硬依赖，
-  // 服务缺席时拿到 undefined 而不是崩溃。
-  const approval = ctx.get('approval');
-  if (approval !== undefined && exec.agent !== undefined) {
+  const presets = ctx.get('permissionPresets' as never) as { current?(session: unknown): string } | undefined;
+  if (exec.agent !== undefined) {
     try {
-      // overrideOf(session)：读该会话的审批策略覆盖（dsh-user-approval API）。
-      // ⚠️ 这个 API 只能在"开着的 turn"内调用（本处理器正是在 turn 内跑的）。
-      if (approval.overrideOf(exec.agent.session as never) === 'never') return 'bypass';
+      if (presets?.current?.(exec.agent.session) === 'danger-full-access') return 'bypass';
     } catch {
-      /* 会话形状不认识：当普通情况处理，照常询问 */
+      // 宿主无法读取当前会话的预设时，按常规询问处理。
     }
   }
-  if (approval === undefined) {
+  if (ctx.get('approval') === undefined) {
     return {
       kind: 'deny',
       reason: `This action needs user confirmation (settings tabbit.${settingsKey} = ask), but no approval channel is mounted in this composition. Set settings tabbit.${settingsKey} to "always" to allow it without prompts.`,
@@ -104,16 +90,17 @@ export const name = 'tabbit-permissions';
 export const inject = ['tools', 'tabbit'];
 
 export function apply(ctx: Context): void {
-  // "挂账本"：已发出的内网询问，callId → 该在调用成功后授信的 (会话, origin)。
-  // 只在 ask 路径上挂账——这保证授权永远不可能发给"决策当时是公网"的目标
-  // （防 DNS rebinding 继承授权，见文件头）。
-  const pendingIntranetGrants = new Map<string, { agentId: string; origin: string }>();
+  // 仅给真正发出的询问挂账。常开、Full access 和失败都不会留下会话授权。
+  const pendingGrants = new Map<string, { pageAccess: boolean; origin?: string }>();
 
   // ── 事前拦截：tools/pre-execute 瀑布 ──────────────────────────────────
   ctx.on('tools/pre-execute', async function (exec, next) {
     // 不归我们管的工具：立刻放行给下一个处理器。
     if (!GATED_TOOLS.has(exec.name)) return next();
     const settings = ctx.tabbit.currentSettings();
+    const agentId = exec.agent !== undefined ? String(exec.agent.id) : undefined;
+    const needsPageApproval = settings.pageAccess === 'ask' &&
+      (agentId === undefined || !ctx.tabbit.hasPageAccessGrant(agentId));
 
     // 总闸 never：两个工具一律拒绝。
     if (settings.pageAccess === 'never') {
@@ -137,7 +124,6 @@ export function apply(ctx: Context): void {
             };
           }
           if (settings.intranetFetch === 'ask') {
-            const agentId = exec.agent !== undefined ? String(exec.agent.id) : undefined;
             const origin = originOf(url);
             // 本会话对这个 origin 是否已授权过？
             const granted =
@@ -146,13 +132,15 @@ export function apply(ctx: Context): void {
               const outcome = resolveAsk(
                 ctx,
                 exec,
-                `web_fetch targets a PRIVATE/INTRANET address through your browser: ${reason}. First request to ${origin ?? 'this target'} in this session — allow it? (Set settings tabbit.intranetFetch to "always" to skip these prompts.)`,
+                `web_fetch targets a PRIVATE/INTRANET address through your browser: ${reason}. First request to ${origin ?? 'this target'} in this session — allow it?${needsPageApproval ? ' This also allows this session to browse with your logged-in profile.' : ''} (Set settings tabbit.intranetFetch to "always" to skip these prompts.)`,
                 'intranetFetch',
               );
               if (outcome !== 'bypass') {
                 // 真的发出了询问：按 callId 挂账，等 tools/result 里对账。
-                if (outcome.kind === 'ask' && agentId !== undefined && origin !== undefined) {
-                  pendingIntranetGrants.set(String(exec.callId), { agentId, origin });
+                if (outcome.kind === 'ask' && agentId !== undefined) {
+                  pendingGrants.set(grantKey(agentId, exec.callId), {
+                    pageAccess: needsPageApproval, ...(origin !== undefined ? { origin } : {}),
+                  });
                 }
                 return outcome;
               }
@@ -164,37 +152,44 @@ export function apply(ctx: Context): void {
     }
 
     // ── 总闸：pageAccess = ask 且本会话还没授权过 → 发起询问 ──────────
-    if (settings.pageAccess === 'ask' && exec.agent !== undefined && !ctx.tabbit.hasPageAccessGrant(String(exec.agent.id))) {
+    if (needsPageApproval) {
       const outcome = resolveAsk(
         ctx,
         exec,
         'First Tabbit Browser page access in this session: the agent will browse with your real browser profile, including logged-in sessions. Allow browser access for this session? (Set settings tabbit.pageAccess to "always" to skip this prompt.)',
         'pageAccess',
       );
-      if (outcome !== 'bypass') return outcome;
+      if (outcome !== 'bypass') {
+        if (outcome.kind === 'ask' && agentId !== undefined) {
+          pendingGrants.set(grantKey(agentId, exec.callId), { pageAccess: true });
+        }
+        return outcome;
+      }
     }
 
     // 所有门都过了：放行执行。
     return next();
   });
 
-  // ── 事后记账：tools/result ────────────────────────────────────────────
-  // 一次被门拦过的调用最终【成功】，说明用户点了允许（或策略放行）——把授权
-  // 记进会话记忆，让询问做到"页面访问每会话一次、内网每会话每 origin 一次"，
-  // 而不是每次调用都问。失败什么都不记（用户拒绝/执行出错，下次重试再问）。
+  // DSH 只在批准后运行工具；调用结束即销账，成功的询问才留下授权。
   ctx.on('tools/result', (exec, result) => {
-    // 先对内网挂账：找到本 callId 的账，成功才授信，成败都销账。
-    const pending = pendingIntranetGrants.get(String(exec.callId));
-    if (pending !== undefined) {
-      pendingIntranetGrants.delete(String(exec.callId));
-      if (!result.isError) ctx.tabbit.grantIntranet(pending.agentId, pending.origin);
-    }
-    // 再记总闸授权：任何受管工具的成功调用都算"用户认可过页面访问"。
-    if (!GATED_TOOLS.has(exec.name)) return;
-    if (result.isError) return;
     if (exec.agent === undefined) return;
-    ctx.tabbit.grantPageAccess(String(exec.agent.id));
+    const agentId = String(exec.agent.id);
+    const key = grantKey(agentId, exec.callId);
+    const pending = pendingGrants.get(key);
+    if (pending === undefined) return;
+    pendingGrants.delete(key);
+    if (result.isError) return;
+    // 浏览器工具把执行失败作为结构化值返回时，DSH 外层仍可能标记成功。
+    if (exec.name === 'tabbit_browser' && (result as { value?: { status?: string } }).value?.status === 'failed') return;
+    if (pending.pageAccess) ctx.tabbit.grantPageAccess(agentId);
+    if (pending.origin !== undefined) ctx.tabbit.grantIntranet(agentId, pending.origin);
   });
+}
+
+/* 不同会话的工具调用 ID 可以相同，挂账和销账都带会话 ID。 */
+function grantKey(agentId: string, callId: unknown): string {
+  return JSON.stringify([agentId, String(callId)]);
 }
 
 /* 提取 URL 的 origin（协议+主机+端口）——内网授权的记忆粒度。 */

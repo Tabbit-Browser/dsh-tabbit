@@ -71,12 +71,12 @@ DSH 0.1.x：将这四项写在 `$DSH_HOME/settings.yaml` 的 `tabbit:` 节下。
 3. 继承的 `TABBIT_PLAYWRIGHT_INSTANCE` 环境变量（嵌入形态：Tabbit 启动打包的 dsh 时注入自己的实例 id，即为权威通道）；
 4. 注册表自动选择（唯一在线实例；歧义时报带实例列表的引导错误。Windows 上注册表不可读时委托原生 CLI 自行选择）。
 
-Full access 说明：dsh 的 `danger-full-access` 权限预设会给会话写入审批策略 `never`（dsh 定义为"自动拒绝一切询问"）。本插件的权限门检测到该覆盖时**自动放行**，不再发出注定被拒的询问——Full access 就是完全访问（该模式下 bash 本就不受限，单拦浏览器工具没有防御价值）。例外：部署级把审批默认配成 `never`（非会话覆盖）时公开 API 读不到，仍会被拒；无审批通道的组合（如某些 headless 编排）会得到指明 `tabbit.pageAccess: always` 出路的拒绝信息。
+当 DSH 确认当前预设为 Full access（`danger-full-access`）时，Tabbit 跳过 `ask` 确认。显式拒绝仍然有效。Auto 和自定义预设下的询问由 DSH 处理。无审批通道的部署可以显式选择 `always`。
 
 ## 权限及安全
 
 - 基于对用户数据安全和用户登录态权限的考量，设计了独立的 `pageAccess` 权限，该权限独立于文件系统/沙箱权限，默认放行。
-- 选择 `ask` 时，某工具调用成功后，本会话后续调用不再重复询问；失败不记入（失败后重试会再次询问）。
+- 选择 `ask` 时，用户批准且工具成功后才记录本会话的授权。
 
 ## 开发
 

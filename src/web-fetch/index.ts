@@ -24,14 +24,10 @@
  * 里显示为 "DeepSeek Harness · Web Fetch" 标签组）；每次请求开新页，
  * 提取后关页并 finish 任务，避免留下任务自带的 about:blank 标签组。
  *
- * 选择机制：dsh 的 `ctx.web` 按【钉死的 provider id】选 provider——没有
- * 优先级链，config 里钉的 id 还优先于环境变量 DSH_WEB_FETCH_PROVIDER。基座
- * 把 fetchProvider 钉为内置的 `http`，本 bundle 的 cordis.patch.yml 把它改
- * 钉为本 provider 的 id `tabbit-browser`——因此本文件注册后就是唯一会被使
- * 用的抓取通道；浏览器不可用时 dsh 报 WEB_PROVIDER_CONFIGURED_UNAVAILABLE
- * （工具仍可见，调用时才报错），不会回落到内置直连抓取器。工具开关
- * tool-web.fetch 由 web 形态的标准 preset（alpha.1 起自带 true）和本 bundle
- * 补丁（headless 形态）打开。
+ * DSH 按 fetchProvider 选择抓取器。插件默认选中 `tabbit-browser`，并保留
+ * 用户显式选择的抓取器。选择 Tabbit 后，如果浏览器不可用，DSH 返回
+ * WEB_PROVIDER_CONFIGURED_UNAVAILABLE。标准 Web preset 和 bundle 的
+ * headless 配置分别打开 tool-web.fetch。
  */
 import { existsSync } from 'node:fs';
 
@@ -238,7 +234,7 @@ try {
 export const name = 'tabbit-web-fetch';
 export const inject = ['web', 'tabbit'];
 
-/* 插件入口：把 provider 注册进 dsh 的 web 服务（补丁层已把 fetchProvider 钉到它的 id 上）。 */
+/* 插件入口：注册 Tabbit 抓取器，默认选择由 web-config 在 Loader 内补齐。 */
 export function apply(ctx: Context): void {
   ctx.web.registerFetchProvider(new TabbitFetchProvider(ctx.tabbit));
 }

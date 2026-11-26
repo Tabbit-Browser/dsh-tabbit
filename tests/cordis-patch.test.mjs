@@ -41,11 +41,13 @@ test('package name matches the published loader entry', () => {
   assert.doesNotMatch(patch, /name:\s+tabbit-browser\s*$/m)
 })
 
-test('the web row inherits host config and only overrides the registered fetch provider', async () => {
+test('the web row preserves the host config and waits for the Tabbit fetch default', async () => {
   const webRow = patch.slice(patch.lastIndexOf('\n- id: web\n'))
   const providerSource = await readFile(new URL('../src/web-fetch/index.ts', import.meta.url), 'utf8')
+  const defaultSource = await readFile(new URL('../src/web-config/index.ts', import.meta.url), 'utf8')
   const providerId = providerSource.match(/readonly id = '([^']+)'/)?.[1]
   assert.ok(providerId)
-  assert.match(webRow, /searchProvider: !!js ctx\.tabbitInheritedSearchProvider\(ctx\)/)
-  assert.ok(webRow.includes(`fetchProvider: ${providerId}`))
+  assert.match(webRow, /inject: \[tabbitFetchDefaults\]/u)
+  assert.doesNotMatch(webRow, /^  config:/mu)
+  assert.ok(defaultSource.includes(`'${providerId}'`))
 })

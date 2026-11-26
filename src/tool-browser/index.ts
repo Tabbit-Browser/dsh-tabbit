@@ -35,7 +35,7 @@ import { readFile, stat } from 'node:fs/promises';
 import type { Context } from '@deepseek-ai/cordis';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 
-import { TabbitCliError } from '../runtime/errors.js';
+import { isUnknownTaskError, TabbitCliError } from '../runtime/errors.js';
 
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
@@ -311,23 +311,26 @@ export function apply(ctx: Context): void {
         const requestedClaims = args.claim_tabs !== undefined && args.claim_tabs.length > 0 ? args.claim_tabs : undefined;
         // 本会话登记表里已经有这个任务名 → 一定是复用，创建时的 --claim-tab
         // 语义上不会生效（evaluate 会撞见 reused=true 直接抛错）。改走独立的
-        // claim 子命令，成功/失败都不让整个调用失败，只把结果软性附加到
-        // 最终返回值——求值本身该跑还是照跑（模型可能只是顺手多认领一个
-        // 标签页，不代表这次调用的主要目的就是认领）。
-        let claimOutcome: Pick<BrowserToolValue, 'claimedTabCount' | 'ownedPageCount' | 'claimError'> = {};
+        // claim 子命令。失败时立即返回，避免用户指定的标签页未认领却在原任务执行。
+        let claimOutcome: Pick<BrowserToolValue, 'claimedTabCount' | 'ownedPageCount'> = {};
         let claimAtCreation = requestedClaims;
         if (requestedClaims !== undefined && tabbit.sessionTasks(agentId).includes(task)) {
-          claimAtCreation = undefined; // 已经在这里处理了，别再让 evaluate 撞 CLAIM_REQUIRES_NEW_TASK
           try {
             const claimed = await client.claimTabs(task, requestedClaims);
+            claimAtCreation = undefined; // 已认领，求值无需再次申请。
             claimOutcome = {
               claimedTabCount: requestedClaims.length,
               ...(claimed.ownedPageCount !== undefined ? { ownedPageCount: claimed.ownedPageCount } : {}),
             };
           } catch (error) {
-            claimOutcome = {
-              claimError: error instanceof TabbitCliError ? friendlyCliError(error) : String((error as Error)?.message ?? error),
-            };
+            // 任务在浏览器重启、过期或切换实例后可能已不存在，改为随求值创建并认领。
+            if (!isUnknownTaskError(error)) {
+              const message = error instanceof TabbitCliError ? friendlyCliError(error) : String((error as Error)?.message ?? error);
+              return {
+                status: 'failed', task, error: message, claimError: message,
+                errorCode: error instanceof TabbitCliError ? error.code : 'CLAIM_FAILED',
+              } satisfies BrowserToolValue as unknown as JsonValue;
+            }
           }
         }
 
